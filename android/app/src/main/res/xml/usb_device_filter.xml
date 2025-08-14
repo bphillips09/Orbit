@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Broad coverage for common USB-to-UART/TTL chipsets -->
+    <!-- FTDI (FT232R/FT232 etc.) vendor 0x0403 -->
+    <usb-device vendor-id="1027" />
+
+    <!-- Specific FTDI products -->
+    <!-- 0x0403 / 0x6001: FTDI FT232R UART -->
+    <usb-device vendor-id="1027" product-id="24577" />
+    <!-- 0x0403 / 0x6015: FTDI FT231X -->
+    <usb-device vendor-id="1027" product-id="24597" />
+
+    <!-- Prolific PL2303 vendor 0x067B -->
+    <usb-device vendor-id="1659" />
+
+    <!-- Silicon Labs CP210x vendor 0x10C4 -->
+    <usb-device vendor-id="4292" />
+
+    <!-- 0x10C4 / 0xEA60: CP210x UART Bridge -->
+    <usb-device vendor-id="4292" product-id="60000" />
+
+    <!-- QinHeng/Winchiphead CH340/CH341 vendor 0x1A86 -->
+    <usb-device vendor-id="6790" />
+
+    <!-- CH340 common PID 0x7523 (decimal 29987) -->
+    <usb-device vendor-id="6790" product-id="29987" />
+
+    <!-- WCH older alt id sometimes seen 0x4348 (rare); include for safety -->
+    <usb-device vendor-id="17224" />
+
+    <!-- Arduino LLC vendor 0x2341 and Arduino SA 0x2A03 (CDC-ACM) -->
+    <usb-device vendor-id="9025" />
+    <usb-device vendor-id="10755" />
+
+    <!-- Teensy (PJRC) 0x16C0 / 0x0483: Teensyduino -->
+    <usb-device vendor-id="5824" product-id="1155" />
+
+    <!-- STMicroelectronics (Nucleo/Discovery CDC) vendor 0x0483 -->
+    <usb-device vendor-id="1155" />
+
+    <!-- Prolific PL2303 0x067B / 0x2303 -->
+    <usb-device vendor-id="1659" product-id="8963" />
+
+    <!-- Segger J-Link 0x1366 / 0x0105 -->
+    <usb-device vendor-id="4966" product-id="261" />
+
+    <!-- CDC-ACM class match (class 0x02, subclass 0x02, protocol 0x01 or 0x00) -->
+    <usb-device class="2" subclass="2" />
+</resources>
+
+

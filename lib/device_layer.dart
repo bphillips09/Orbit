@@ -1,0 +1,657 @@
+// DeviceLayer, handles the raw communication with the device
+import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:orbit/helpers.dart';
+import 'package:orbit/device_message.dart';
+import 'package:orbit/serial_helper/serial_helper_interface.dart';
+import 'package:orbit/sxi_command_types.dart';
+import 'package:orbit/sxi_commands.dart';
+import 'package:orbit/sxi_indication_types.dart';
+import 'package:orbit/sxi_payload.dart';
+import 'package:orbit/sxi_layer.dart';
+import 'package:orbit/logging.dart';
+import 'package:orbit/debug_tools_stub.dart'
+    if (dart.library.io) 'package:orbit/debug_tools.dart';
+
+class DeviceLayer {
+  // Handshake and heartbeat timing
+  static const Duration deviceResponseTimeout = Duration(seconds: 3);
+  static const Duration heartbeatInterval = Duration(seconds: 2);
+  static const Duration heartbeatStaleThreshold = Duration(seconds: 10);
+  // Buffer management
+  static const int maxRxBufferBytes = 4096; // Cap to avoid overflow
+
+  final int baudRate;
+  final Object port;
+  final SXiLayer _sxiLayer;
+  final StreamController<DeviceMessage> _receiveController =
+      StreamController<DeviceMessage>.broadcast();
+  final SystemConfiguration? systemConfiguration;
+  final SerialHelper _serialHelper = SerialHelper();
+  final Function(String title, String message,
+      {bool snackbar, bool dismissable})? onMessage;
+  final Function(String details, bool fatal)? onError;
+  final Function(String title, String details)? onConnectionDetailChanged;
+  final Function()? onClearMessages;
+
+  int _highestReceivedSequence = 0;
+  bool _initialized = false;
+  Uint8List _buffer = Uint8List(0);
+  Timer? _heartbeatMonitorTimer;
+  DateTime? _lastValidMessage;
+
+  DeviceLayer(this._sxiLayer, this.port, this.baudRate,
+      {this.systemConfiguration,
+      this.onMessage,
+      this.onError,
+      this.onConnectionDetailChanged,
+      this.onClearMessages});
+
+  void _updateConnectionDetail(String details,
+      {String title = 'Connecting...'}) {
+    onConnectionDetailChanged?.call(title, details);
+  }
+
+  Future<bool> startupSequence() async {
+    _initialized = false;
+    _sxiLayer.deviceLayer = this;
+    _stopHeartbeatMonitor();
+
+    _updateConnectionDetail('Starting...');
+
+    // If the device is not booted, we have to connect at 57600 baud
+    if (await _attemptInitializationAtBaudRate(57600)) {
+      return await _finalizeConnection();
+    }
+
+    // If the device is booted, we can connect at any other baud rate
+    final int desiredSecondaryBaud = _sxiLayer.appState.secondaryBaudRate;
+    if (await _attemptConnectionAtBaudRate(desiredSecondaryBaud)) {
+      return await _finalizeConnection(anyDeviceMessage: true);
+    }
+
+    onError?.call('Failed to Connect to Device', true);
+    _stopHeartbeatMonitor();
+    return false;
+  }
+
+  // Attempt to initialize the device at a given baud rate
+  Future<bool> _attemptInitializationAtBaudRate(int baudRate) async {
+    _updateConnectionDetail('Initializing...');
+
+    if (!await _serialHelper.openPort(port, baudRate)) {
+      onError?.call('Failed to open $port at $baudRate baud', false);
+      return false;
+    }
+
+    _serialHelper.readData(_processData, (error, expectedClosure) {
+      if (!expectedClosure) {
+        _initialized = false;
+        onError?.call(error.toString(), true);
+        _stopHeartbeatMonitor();
+      }
+    });
+
+    _updateConnectionDetail('Sending init to device...');
+    await sendInitPayload();
+
+    // Wait for the device to respond to the init payload
+    // If it does, switch to preferred secondary baud
+    if (await _waitForMessage()) {
+      final int desiredSecondaryBaud = _sxiLayer.appState.secondaryBaudRate;
+      return await switchBaudRate(desiredSecondaryBaud);
+    }
+
+    _updateConnectionDetail('Closing connection...', title: 'Initialized');
+    await _serialHelper.closePort();
+    return false;
+  }
+
+  // Attempt to connect to the device at a given baud rate
+  Future<bool> _attemptConnectionAtBaudRate(int baudRate) async {
+    _updateConnectionDetail(
+        'Starting secondary connection at $baudRate baud...');
+
+    if (!await _serialHelper.openPort(port, baudRate)) {
+      onError?.call('Failed to open $port at $baudRate baud', false);
+      return false;
+    }
+
+    _serialHelper.readData(_processData, (error, expectedClosure) {
+      if (!expectedClosure) {
+        _initialized = false;
+        onError?.call(error.toString(), true);
+        _stopHeartbeatMonitor();
+      }
+    });
+
+    if (await _waitForMessage(anyDeviceMessage: true)) {
+      return true;
+    }
+
+    onError?.call('Device did not respond in time.', false);
+    await _serialHelper.closePort();
+    return false;
+  }
+
+  // Finalize the connection
+  Future<bool> _finalizeConnection({bool anyDeviceMessage = false}) async {
+    _updateConnectionDetail('Finalizing Connection...');
+
+    if (!await _waitForMessage(anyDeviceMessage: anyDeviceMessage)) {
+      return false;
+    }
+
+    // Send the config payload, which finishes the boot-up sequence
+    sendConfigPayload();
+
+    // Re-apply monitored data services selection if any
+    try {
+      final selected = _sxiLayer.appState.monitoredDataServices;
+      for (final d in selected) {
+        final cfgCmd = SXiMonitorDataServiceCommand(
+          DataServiceMonitorUpdateType.startMonitorForService,
+          d,
+        );
+        sendControlCommand(cfgCmd);
+      }
+    } catch (_) {}
+
+    _startHeartbeatMonitor();
+    return true;
+  }
+
+  // Any valid device message unblocks the wait
+  Future<bool> _waitForMessage({bool anyDeviceMessage = false}) async {
+    _updateConnectionDetail('Waiting for device to respond...');
+
+    const timeout = deviceResponseTimeout;
+    final completer = Completer<bool>();
+
+    Timer(timeout, () {
+      if (!completer.isCompleted) {
+        completer.complete(false);
+      }
+    });
+
+    StreamSubscription? listener;
+    listener = _receiveController.stream.listen((message) {
+      if (anyDeviceMessage ||
+          message.isInitMessage() ||
+          message.payload.runtimeType == HeartbeatPayload) {
+        // Heartbeat received, now we're just waiting for playback info
+        _updateConnectionDetail('Loading Data...', title: 'Connected');
+        _initialized = true;
+        _lastValidMessage = DateTime.now();
+
+        if (!completer.isCompleted) {
+          completer.complete(true);
+        }
+
+        listener!.cancel();
+      }
+    });
+
+    return completer.future;
+  }
+
+  // Start the heartbeat monitor
+  void _startHeartbeatMonitor() {
+    _heartbeatMonitorTimer?.cancel();
+    _heartbeatMonitorTimer = Timer.periodic(heartbeatInterval, (timer) {
+      if (_lastValidMessage == null ||
+          DateTime.now().difference(_lastValidMessage!) >
+              heartbeatStaleThreshold) {
+        _serialHelper.closePort();
+        timer.cancel();
+        logger.w('No heartbeat received in the last 10 seconds');
+        onError?.call('Error communicating with the device.', true);
+      }
+    });
+  }
+
+  // Stop the heartbeat monitor
+  void _stopHeartbeatMonitor() {
+    _heartbeatMonitorTimer?.cancel();
+    _heartbeatMonitorTimer = null;
+  }
+
+  // Process the raw data from the device
+  void _processData(Uint8List data) {
+    // Append raw bytes and trace if enabled
+    if (FrameTracer.instance.isEnabled) {
+      // We write the raw RX chunk; complete frames are logged below
+      FrameTracer.instance.logRxFrame(data);
+    }
+    _buffer = Uint8List.fromList(_buffer + data);
+
+    // Limit the buffer size to prevent overflow
+    if (_buffer.length > maxRxBufferBytes) {
+      logger.w('Buffer too large, resetting.');
+      _buffer = Uint8List(0);
+      return;
+    }
+
+    while (_buffer.length >= 8) {
+      if (_buffer[0] == 0xDE && _buffer[1] == 0xC6) {
+        // Frame Checking Step 1: Sync bytes matched
+        if (_buffer.length >= 6) {
+          final payloadLength = bitCombine(_buffer[4], _buffer[5]);
+          final frameLength = 8 + payloadLength;
+
+          if (_buffer.length >= frameLength) {
+            // Frame Checking Step 2: Extract the full frame
+            final frame = _buffer.sublist(0, frameLength);
+            if (FrameTracer.instance.isEnabled) {
+              // Log parsed RX frame
+              FrameTracer.instance.logRxFrame(frame);
+            }
+
+            // Frame Checking Step 3: Validate checksum and process frame
+            if (validateChecksum(frame)) {
+              try {
+                final message = DeviceMessage.fromBytes(frame);
+                _receiveController.add(message);
+
+                _highestReceivedSequence = message.sequence;
+                _sxiLayer.processMessage(message);
+
+                _lastValidMessage = DateTime.now();
+              } catch (e) {
+                logger.w('Error parsing DeviceMessage: $e');
+                logger.d('Frame (first 30 bytes): ${frame.take(30).toList()}');
+                forceAck(frame[6], frame[7], frame[8], frame[2], frame);
+              }
+            } else {
+              logger.d(
+                  'Checksum failure; first 30 bytes: ${frame.take(30).toList()}');
+            }
+
+            // Frame Checking Step 4: Truncate buffer to remove processed frame
+            _buffer = _buffer.sublist(frameLength);
+          } else {
+            // Frame is incomplete, wait for more data
+            break;
+          }
+        } else {
+          // Header is incomplete, wait for more data
+          break;
+        }
+      } else {
+        // Invalid sync bytes, discard until the next possible sync sequence
+        // This sometimes works, sometimes doesn't
+        final nextSyncIndex = _buffer.indexOf(0xDE, 1);
+        if (nextSyncIndex != -1 &&
+            nextSyncIndex + 1 < _buffer.length &&
+            _buffer[nextSyncIndex + 1] == 0xC6) {
+          _buffer =
+              _buffer.sublist(nextSyncIndex); // Truncate to next sync bytes
+        } else {
+          logger.d('Invalid sync bytes, clearing buffer.');
+          _buffer = Uint8List(0); // Clear buffer if no valid sync bytes found
+          break;
+        }
+      }
+    }
+  }
+
+  // Validate the checksum of a given frame
+  bool validateChecksum(List<int> data) {
+    int receivedChecksum =
+        bitCombine(data[data.length - 2], data[data.length - 1]);
+    int calculatedChecksum =
+        calculateChecksum(data.sublist(0, data.length - 2));
+    return receivedChecksum == calculatedChecksum;
+  }
+
+  // Calculate the checksum of a given frame
+  int calculateChecksum(List<int> data) {
+    int checkValue = 0;
+    for (var byte in data) {
+      checkValue =
+          ((checkValue + byte) & 0xFF) * 0x100 + (checkValue + byte) + 0x100;
+      checkValue = ((checkValue >> 16) ^ checkValue) & 0xFFFF;
+    }
+    return checkValue;
+  }
+
+  // Close the device layer
+  Future<void> close() async {
+    _buffer = Uint8List(0);
+    _serialHelper.closePort();
+    await _receiveController.close();
+  }
+
+  // Send a command to the device
+  DeviceMessage? sendControlCommand(SXiPayload payload) {
+    if (!_initialized) {
+      onError?.call('Device is not initialized', true);
+      return null;
+    }
+
+    logger.t('Send Control Command: $payload');
+
+    // Increment the sequence number
+    final sequence = incrementSequence();
+    final message = DeviceMessage(sequence, PayloadType.control, payload);
+    _sxiLayer.txBuffer.add(message);
+
+    // Set the state to send control command
+    _sxiLayer.sxiState = SXiState.sendControlCommand;
+
+    // Cycle the state, which will send the frame to the device
+    _sxiLayer.cycleState();
+
+    return message;
+  }
+
+  // Send a frame to the device
+  Future<void> sendFrame(DeviceMessage message) async {
+    final frame = message.toBytes();
+    var send = Uint8List.fromList(frame);
+
+    if (!message.isAck()) {
+      logger.t('TX: $message - ${send.length} bytes');
+    }
+
+    // Trace the frame if enabled
+    if (FrameTracer.instance.isEnabled) {
+      FrameTracer.instance.logTxFrame(send);
+    }
+
+    // Write the frame to the device
+    _serialHelper.writeData(send);
+  }
+
+  // Increment the sequence number
+  int incrementSequence() {
+    _highestReceivedSequence = (_highestReceivedSequence + 1) % 256;
+    return _highestReceivedSequence;
+  }
+
+  // Add additional payload to the acknowledgement payload
+  void addPayloadToAck(List<int> ackPayload, List<int> additionalPayload) {
+    if (ackPayload.length + additionalPayload.length <= 10) {
+      ackPayload.addAll(additionalPayload);
+    } else {
+      onError?.call('Payload ACK failed: Length Exceeded', false);
+    }
+  }
+
+  // Build an acknowledgement message
+  Future<void> buildAck(
+      DeviceMessage message, List<int>? additionalPayload) async {
+    final int opcodeMsb = message.payload.opcodeMsb;
+    final int opcodeLsb = message.payload.opcodeLsb;
+    final int transactionID = message.payload.transactionID;
+    final int sequence = message.sequence;
+
+    final firstByte = ((opcodeMsb & 0x3F) | 0x40) & 0xFF;
+    final secondByte = opcodeLsb & 0xFF;
+
+    // Build the acknowledgement payload
+    final ackPayload = [firstByte, secondByte, transactionID];
+
+    // Add the additional acknowledgement payload if we have one
+    if (additionalPayload != null) {
+      addPayloadToAck(ackPayload, additionalPayload);
+    }
+
+    // Create the acknowledgement message
+    final ackMessage = DeviceMessage(
+      sequence,
+      PayloadType.control,
+      GenericPayload.fromBytes(ackPayload),
+    );
+
+    // Add the acknowledgement message to the TX buffer
+    _sxiLayer.txBuffer.add(ackMessage);
+  }
+
+  // We couldn't parse the message, so we need to force an acknowledgement
+  Future<void> forceAck(int opcodeMsb, int opcodeLsb, int transactionID,
+      int sequence, List<int> frame) async {
+    // Determine message type from opcode using existing indications map
+    final opcode = bitCombine(opcodeMsb, opcodeLsb);
+    String messageType = 'Unknown';
+
+    // Check if we have a known indication type
+    var constructor = SXiPayload.indications[opcode];
+    if (constructor != null) {
+      try {
+        messageType = constructor.toString();
+      } catch (e) {
+        messageType = 'Known indication (parse failed)';
+      }
+    }
+
+    onError?.call('''Force ACK: $sequence [$opcodeMsb $opcodeLsb] $transactionID
+        Message Type: $messageType (0x${opcode.toRadixString(16).padLeft(4, '0').toUpperCase()})''',
+        false);
+
+    final firstByte = ((opcodeMsb & 0x3F) | 0x40) & 0xFF;
+    final secondByte = opcodeLsb & 0xFF;
+
+    final ackPayload = [firstByte, secondByte, transactionID];
+
+    // Build additional acknowledgement payload based on message type
+    List<int>? additionalPayload;
+    try {
+      switch (opcode) {
+        case 0x80a0: // SXiStatusIndication
+        case 0x8201: // SXiCategoryInfoIndication
+          // Need frame[4] (indCode or categoryTypeID) - sublist(4, 5) from payload
+          if (frame.length > 10) {
+            // 6 bytes header + 3 bytes payload minimum + 2 checksum
+            additionalPayload = [
+              frame[10]
+            ]; // frame[6] + 4 = frame[10] for indCode
+          }
+          break;
+        case 0x8300: // SXiMetadataIndication
+        case 0x8281: // SXiChannelInfoIndication
+        case 0x8301: // SXiChannelMetadataIndication
+        case 0x8303: // SXiLookAheadMetadataIndication
+          // Need payload sublist(6, 8) which corresponds to chanIDMsb, chanIDLsb
+          if (frame.length > 13) {
+            // 6 bytes header + 6 bytes payload minimum + 2 checksum
+            additionalPayload = [frame[10], frame[11]]; // chanIDMsb, chanIDLsb
+          }
+          break;
+      }
+
+      if (additionalPayload != null) {
+        logger.d(
+            'Force ACK: Adding additional payload: $additionalPayload for $messageType');
+        addPayloadToAck(ackPayload, additionalPayload);
+      }
+    } catch (e) {
+      logger.w(
+          'Force ACK: Error building additional payload for $messageType: $e');
+      // Continue with basic acknowledgement if additional payload fails
+    }
+
+    final ackMessage = DeviceMessage(
+      sequence,
+      PayloadType.control,
+      GenericPayload.fromBytes(ackPayload),
+    );
+
+    _sxiLayer.txBuffer.add(ackMessage);
+    _sxiLayer.sxiState = SXiState.sendControlCommand;
+    _sxiLayer.cycleState();
+  }
+
+  // Send the init payload
+  Future<void> sendInitPayload() async {
+    logger.d('Sending init payload');
+    // Map actual baud to device code
+    final int configuredBaud = _sxiLayer.appState.secondaryBaudRate;
+    int baud;
+    switch (configuredBaud) {
+      case 57600:
+        baud = 0;
+        break;
+      case 115200:
+        baud = 1;
+        break;
+      case 230400:
+        baud = 2;
+        break;
+      case 460800:
+        baud = 3;
+        break;
+      case 921600:
+        baud = 4;
+        break;
+      default:
+        baud = 3;
+        break;
+    }
+    final initPayload = GenericPayload(0, 0, baud, [0]);
+
+    final message = DeviceMessage(0, PayloadType.init, initPayload);
+    await sendFrame(message);
+  }
+
+  // Send the module configuration payload
+  Future<void> sendConfigPayload() async {
+    int volume = systemConfiguration?.volume ?? 0;
+    int defaultSid = systemConfiguration?.defaultSid ?? 0;
+    List<int> eq = systemConfiguration?.eq ?? List<int>.filled(10, 0);
+    List<int> presets = List<int>.filled(20, 1);
+    if (systemConfiguration != null) {
+      for (int i = 0; i < systemConfiguration!.presets.length; i++) {
+        presets[i] = systemConfiguration!.presets[i];
+      }
+    }
+
+    List<SXiPayload> initPayloads = [
+      // Standard module config
+      SXiConfigureModuleCommand(1, 2, 2, 0, 0, 0, 1, 1, 1, 0, 3, 0),
+      // Unlock all channels
+      SXiConfigureChannelAttributesCommand(
+          ChanAttribCfgChangeType.lockChannel, List.filled(24, 0x0000)),
+      // Setup smart favorites
+      SXiListChannelAttributesCommand(
+          ChanAttribListChangeType.smartFavorite, presets),
+      // Setup tunemix
+      SXiListChannelAttributesCommand(
+          ChanAttribListChangeType.tuneMix1, presets),
+      // Tune to default SID
+      SXiSelectChannelCommand(ChanSelectionType.tuneUsingSID, defaultSid, 1,
+          Overrides.all(), AudioRoutingType.routeToAudio),
+      // Set EQ band gain
+      SXiAudioEqualizerCommand(eq),
+      // Set volume
+      SXiAudioVolumeCommand(volume),
+      // Unmute audio
+      SXiAudioMuteCommand(AudioMuteType.unmute),
+      // Setup metadata monitors (stop all active monitors)
+      SXiExtendedMetadataMonitorCommand(
+          MetadataMonitorType.extendedGlobalMetadata,
+          MonitorChangeType.dontMonitorAll,
+          List.empty()),
+      // Setup channel metadata monitor
+      SXiExtendedMetadataMonitorCommand.channelMetadata(
+        MetadataMonitorType.extendedChannelMetadataForAllChannels,
+        MonitorChangeType.monitor,
+        [
+          ChannelMetadataIdentifier.channelLongDescription,
+          ChannelMetadataIdentifier.similarChannelList,
+          ChannelMetadataIdentifier.channelListOrder,
+          ChannelMetadataIdentifier.channelShortDescription,
+        ],
+      ),
+      // Setup track metadata monitor
+      SXiExtendedMetadataMonitorCommand.trackMetadata(
+          MetadataMonitorType.extendedTrackMetadataForAllChannels,
+          MonitorChangeType.monitor, [
+        TrackMetadataIdentifier.songId,
+        TrackMetadataIdentifier.artistId,
+      ]),
+      // Setup feature monitors (stop all active monitors)
+      SXiMonitorFeatureCommand(MonitorChangeType.dontMonitorAll, List.empty()),
+      // Setup feature monitors (start monitoring all)
+      SXiMonitorFeatureCommand(MonitorChangeType.monitor, [
+        FeatureMonitorType.time,
+        FeatureMonitorType.channelInfo,
+        FeatureMonitorType.categoryInfo,
+        FeatureMonitorType.metadata,
+        FeatureMonitorType.storedMetadata
+      ]),
+      // Setup data monitors (stop all active monitors)
+      SXiMonitorDataServiceCommand(
+          DataServiceMonitorUpdateType.stopMonitorForAllServices,
+          DataServiceIdentifier.none),
+      // Setup data monitors (start monitoring album art and channel graphics)
+      SXiMonitorDataServiceCommand(
+          DataServiceMonitorUpdateType.startMonitorForService,
+          DataServiceIdentifier.albumArt),
+      SXiMonitorDataServiceCommand(
+          DataServiceMonitorUpdateType.startMonitorForService,
+          DataServiceIdentifier.channelGraphicsUpdates),
+      // Setup status monitors (stop all active monitors)
+      SXiMonitorStatusCommand(MonitorChangeType.dontMonitorAll, List.empty()),
+      // Setup status monitors (start monitoring signal and antenna status)
+      SXiMonitorStatusCommand(MonitorChangeType.monitor, [
+        StatusMonitorType.signalAndAntennaStatus,
+        StatusMonitorType.audioDecoderBitrate,
+        StatusMonitorType.audioPresence
+      ]),
+      // Set satellite time to UTC
+      SXiConfigureTimeCommand(TimeZoneType.utc, DSTType.auto),
+    ];
+
+    // Send the module configuration payload in sequence
+    for (int i = 0; i < initPayloads.length; i++) {
+      Future.delayed(Duration(milliseconds: 500 * i), () {
+        sendControlCommand(initPayloads[i]);
+      });
+    }
+  }
+
+  // Switch the baud rate
+  Future<bool> switchBaudRate(int newBaudRate) async {
+    _updateConnectionDetail('Closing existing connection...');
+    await _serialHelper.closePort();
+
+    bool portOpened = false;
+
+    _updateConnectionDetail('Opening new connection at $newBaudRate...');
+    if (kIsWeb || kIsWasm) {
+      portOpened = await _serialHelper.openPort(port, newBaudRate);
+    } else {
+      portOpened = await _serialHelper.openPort(port, newBaudRate);
+    }
+    if (portOpened) {
+      _serialHelper.readData(_processData, (error, expectedClosure) {
+        if (!expectedClosure) {
+          _initialized = false;
+          onError?.call(error.toString(), true);
+          _stopHeartbeatMonitor();
+        }
+      });
+
+      return true;
+    } else {
+      onError?.call(
+          'Unable to open $port at $newBaudRate baud, Unknown Error', false);
+      return false;
+    }
+  }
+}
+
+// Local system configuration
+class SystemConfiguration {
+  int volume = 0;
+  int defaultSid = 0;
+  List<int> eq;
+  List<int> presets;
+
+  SystemConfiguration(
+      {this.volume = 0,
+      this.defaultSid = 0,
+      this.eq = const [],
+      this.presets = const []});
+}

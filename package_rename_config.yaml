@@ -1,0 +1,24 @@
+package_rename_config:
+  android:
+    app_name: Orbit
+    package_name: com.bp.orbit
+
+  linux:
+    app_name: Orbit
+    package_name: com.bp.orbit
+    exe_name: Orbit
+
+  macos:
+    app_name: Orbit
+    package_name: com.bp.orbit
+    copyright_notice: Copyright 2025 BP
+
+  web:
+    app_name: Orbit
+    description: Space Radio
+
+  windows:
+    app_name: Orbit
+    organization: Orbit
+    copyright_notice: Copyright 2025 BP
+    exe_name: Orbit
