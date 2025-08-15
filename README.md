@@ -78,4 +78,4 @@ This project is unaffiliated with any satellite radio provider. Names and tradem
 
 [sxv300-link]: <https://amazon.com/dp/B00NJTO4CY>
 [releases-link]: <https://github.com/bphillips09/orbit/releases/latest>
-[web-link]: <https://bphillips09.github.io/orbit/>
+[web-link]: <https://bphillips09.github.io/Orbit/>
