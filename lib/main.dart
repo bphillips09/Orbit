@@ -36,6 +36,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:orbit/ui/unsupported_browser_app.dart';
 import 'package:orbit/ui/favorite_dialog.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
+import 'package:orbit/ui/welcome_dialog.dart';
 
 // Audio service handler
 AudioServiceHandler? audioServiceHandler;
@@ -216,6 +217,18 @@ class MainPageState extends State<MainPage> {
       );
 
       logger.i('AudioSession configured success');
+
+      // Show first-time welcome
+      if (!appState.welcomeSeen) {
+        try {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          if (mounted) {
+            await WelcomeDialog.show(context, () {
+              appState.updateWelcomeSeen(true);
+            });
+          }
+        } catch (_) {}
+      }
 
       // Listen for playback changes
       appState.playbackInfoNotifier.addListener(onPlaybackInfoChanged);

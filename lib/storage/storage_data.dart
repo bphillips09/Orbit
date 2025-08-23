@@ -81,6 +81,7 @@ class StorageData {
       case SaveDataType.tuneStart:
       case SaveDataType.sliderSnapping:
       case SaveDataType.showOnAirFavoritesPrompt:
+      case SaveDataType.welcomeSeen:
       case SaveDataType.debugMode:
       case SaveDataType.themeMode:
       case SaveDataType.uiScale:
@@ -130,6 +131,7 @@ class StorageData {
       case SaveDataType.tuneStart:
       case SaveDataType.sliderSnapping:
       case SaveDataType.showOnAirFavoritesPrompt:
+      case SaveDataType.welcomeSeen:
       case SaveDataType.debugMode:
       case SaveDataType.themeMode:
       case SaveDataType.uiScale:
@@ -255,6 +257,7 @@ enum SaveDataType {
   tuneStart,
   sliderSnapping,
   showOnAirFavoritesPrompt,
+  welcomeSeen,
   debugMode,
   themeMode,
   uiScale,

@@ -33,6 +33,7 @@ class AppState extends ChangeNotifier {
   bool tuneStart = false;
   bool sliderSnapping = true;
   bool showOnAirFavoritesPrompt = true;
+  bool welcomeSeen = false;
   bool debugMode = false;
   // Android-only: preferred audio output route
   String androidAudioOutputRoute = 'Speaker';
@@ -247,6 +248,12 @@ class AppState extends ChangeNotifier {
       defaultValue: kDebugMode,
     );
 
+    // First-time welcome flag
+    welcomeSeen = await storageData.load(
+      SaveDataType.welcomeSeen,
+      defaultValue: false,
+    );
+
     // Load preferred secondary baud rate
     secondaryBaudRate = await storageData.load(
       SaveDataType.secondaryBaudRate,
@@ -436,6 +443,12 @@ class AppState extends ChangeNotifier {
   void updateDebugMode(bool enabled) {
     debugMode = enabled;
     storageData.save(SaveDataType.debugMode, debugMode);
+    notifyListeners();
+  }
+
+  void updateWelcomeSeen(bool seen) {
+    welcomeSeen = seen;
+    storageData.save(SaveDataType.welcomeSeen, welcomeSeen);
     notifyListeners();
   }
 

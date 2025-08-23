@@ -27,6 +27,31 @@ class UnsupportedBrowserApp extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      Image.asset('assets/icon/icon.png',
+                          width: 128, height: 128),
+                      const SizedBox(height: 16),
+                      Text('Welcome to Orbit',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: onSurfaceColor,
+                          ),
+                          textAlign: TextAlign.center),
+                      const SizedBox(height: 16),
+                      Text('Orbit is an offline satellite radio player.',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: onSurfaceColor,
+                          ),
+                          textAlign: TextAlign.center),
+                      const SizedBox(height: 16),
+                      Text('An SXV300 tuner is required.',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: onSurfaceColor,
+                          ),
+                          textAlign: TextAlign.center),
+                      const SizedBox(height: 64),
                       const Icon(Icons.usb_off, size: 64),
                       const SizedBox(height: 16),
                       Text('Browser Not Supported',
@@ -36,7 +61,15 @@ class UnsupportedBrowserApp extends StatelessWidget {
                             color: onSurfaceColor,
                           ),
                           textAlign: TextAlign.center),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
+                      Text(
+                          'Orbit only supports Chromium-based browsers on Desktop platforms.',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: onSurfaceColor,
+                          ),
+                          textAlign: TextAlign.center),
+                      const SizedBox(height: 16),
                       RichText(
                         textAlign: TextAlign.center,
                         text: TextSpan(
@@ -45,9 +78,7 @@ class UnsupportedBrowserApp extends StatelessWidget {
                             color: onSurfaceColor,
                           ),
                           children: [
-                            const TextSpan(
-                                text:
-                                    'This app only supports Chromium-based browsers on Desktop platforms.\n\nPlease use '),
+                            const TextSpan(text: 'Please use '),
                             TextSpan(
                               text: 'Chrome',
                               style: TextStyle(
@@ -89,6 +120,37 @@ class UnsupportedBrowserApp extends StatelessWidget {
                                 ..onTap = () {
                                   launchUrl(
                                     Uri.parse('https://www.opera.com/'),
+                                    webOnlyWindowName: '_blank',
+                                  );
+                                },
+                            ),
+                            const TextSpan(text: '.'),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      RichText(
+                        textAlign: TextAlign.center,
+                        text: TextSpan(
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: onSurfaceColor,
+                          ),
+                          children: [
+                            const TextSpan(
+                                text:
+                                    'Native versions of Orbit can be downloaded '),
+                            TextSpan(
+                              text: 'here',
+                              style: TextStyle(
+                                color: linkColor,
+                                decoration: TextDecoration.underline,
+                              ),
+                              recognizer: TapGestureRecognizer()
+                                ..onTap = () {
+                                  launchUrl(
+                                    Uri.parse(
+                                        'https://github.com/bphillips09/orbit/releases/latest'),
                                     webOnlyWindowName: '_blank',
                                   );
                                 },
