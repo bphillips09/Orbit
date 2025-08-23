@@ -10,8 +10,8 @@ class ChannelData {
   String channelShortDescription;
   String channelLongDescription;
   List<int> similarSids;
-  int currentSongId;
-  int currentArtistId;
+  int airingSongId;
+  int airingArtistId;
 
   ChannelData(this.sid, this.channelNumber, this.catId, this.channelName,
       {this.currentArtist = '',
@@ -20,7 +20,7 @@ class ChannelData {
       this.channelShortDescription = '',
       this.channelLongDescription = '',
       List<int>? similarSids,
-      this.currentSongId = 0,
-      this.currentArtistId = 0})
+      this.airingSongId = 0,
+      this.airingArtistId = 0})
       : similarSids = similarSids ?? <int>[];
 }

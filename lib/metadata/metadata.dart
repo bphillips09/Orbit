@@ -72,8 +72,8 @@ int advanceOverTmiItems(List<int> bytes, int start, int itemCount) {
     try {
       switch (TrackMetadataIdentifier.getByValue(tag)) {
         case TrackMetadataIdentifier.songId:
-        case TrackMetadataIdentifier.artistId:
         case TrackMetadataIdentifier.itunesSongId:
+        case TrackMetadataIdentifier.artistId:
           if (i + 3 >= bytes.length) return bytes.length;
           i += 4;
           break;
@@ -201,18 +201,25 @@ class TrackMetadataItem {
 
           case TrackMetadataIdentifier.artistId:
             if (index + 3 < tmTagValue.length) {
+              // Value can be present as 4 bytes; use full 32-bit big-endian
               parsedValue = (tmTagValue[index] << 24) |
                   (tmTagValue[index + 1] << 16) |
                   (tmTagValue[index + 2] << 8) |
                   tmTagValue[index + 3];
               index += 4;
               if (logMetadata) {
-                logger.t('TMI Parser: Parsed artistId: $parsedValue');
+                logger.t('TMI Parser: Parsed artistId (32-bit): $parsedValue');
+              }
+            } else if (index + 1 < tmTagValue.length) {
+              parsedValue = (tmTagValue[index] << 8) | tmTagValue[index + 1];
+              index += 2;
+              if (logMetadata) {
+                logger.t('TMI Parser: Parsed artistId (16-bit): $parsedValue');
               }
             } else {
               if (logMetadata) {
                 logger.t(
-                    'TMI Parser: Not enough bytes for artistId (need 4, have ${tmTagValue.length - index})');
+                    'TMI Parser: Not enough bytes for artistId (need 2/4, have ${tmTagValue.length - index})');
               }
             }
             break;
@@ -612,5 +619,166 @@ class GlobalMetadataItem {
   String toString() {
     String identifierName = identifier.toString().split('.').last;
     return 'GMI $identifierName: $value';
+  }
+}
+
+// Parsed metadata result
+class TrackMetadata {
+  final int? songId;
+  final int? artistId;
+  final String? songName;
+  final String? artistName;
+  final String? currentInfo;
+  final List<TrackMetadataItem> allItems;
+
+  TrackMetadata({
+    this.songId,
+    this.artistId,
+    this.songName,
+    this.artistName,
+    this.currentInfo,
+    required this.allItems,
+  });
+}
+
+class ChannelMetadata {
+  final String? shortDescription;
+  final String? longDescription;
+  final List<int>? similarChannels;
+  final int? channelListOrder;
+  final List<ChannelMetadataItem> allItems;
+
+  ChannelMetadata({
+    this.shortDescription,
+    this.longDescription,
+    this.similarChannels,
+    this.channelListOrder,
+    required this.allItems,
+  });
+}
+
+class GlobalMetadata {
+  final List<GlobalMetadataItem> allItems;
+
+  GlobalMetadata({
+    required this.allItems,
+  });
+}
+
+// Parse track metadata
+TrackMetadata getTrackMetadata(List<int> tmTagValue) {
+  if (tmTagValue.isEmpty) {
+    return TrackMetadata(allItems: []);
+  }
+
+  try {
+    List<TrackMetadataItem> items =
+        TrackMetadataItem.parseTrackMetadata(tmTagValue);
+
+    int? songId;
+    int? artistId;
+    String? songName;
+    String? artistName;
+    String? currentInfo;
+
+    for (final item in items) {
+      switch (item.identifier) {
+        case TrackMetadataIdentifier.songId:
+          if (item.value is int) songId = item.value as int;
+          break;
+        case TrackMetadataIdentifier.artistId:
+          if (item.value is int) artistId = item.value as int;
+          break;
+        case TrackMetadataIdentifier.songName:
+          if (item.value is String) songName = item.value as String;
+          break;
+        case TrackMetadataIdentifier.artistName:
+          if (item.value is String) artistName = item.value as String;
+          break;
+        case TrackMetadataIdentifier.currentInfo:
+          if (item.value is String) currentInfo = item.value as String;
+          break;
+        default:
+          break;
+      }
+    }
+
+    return TrackMetadata(
+      songId: songId,
+      artistId: artistId,
+      songName: songName,
+      artistName: artistName,
+      currentInfo: currentInfo,
+      allItems: items,
+    );
+  } catch (e) {
+    logger.w('Error parsing track metadata: $e');
+    logger.t('-->RAW TRACK META: $tmTagValue');
+    return TrackMetadata(allItems: []);
+  }
+}
+
+// Parse channel metadata
+ChannelMetadata getChannelMetadata(List<int> cmTagValue) {
+  if (cmTagValue.isEmpty) {
+    return ChannelMetadata(allItems: []);
+  }
+
+  try {
+    List<ChannelMetadataItem> items =
+        ChannelMetadataItem.parseChannelMetadata(cmTagValue);
+
+    String? shortDescription;
+    String? longDescription;
+    List<int>? similarChannels;
+    int? channelListOrder;
+
+    for (final item in items) {
+      switch (item.identifier) {
+        case ChannelMetadataIdentifier.channelShortDescription:
+          if (item.value is String) shortDescription = item.value as String;
+          break;
+        case ChannelMetadataIdentifier.channelLongDescription:
+          if (item.value is String) longDescription = item.value as String;
+          break;
+        case ChannelMetadataIdentifier.similarChannelList:
+          if (item.value is List<int>) {
+            similarChannels = List<int>.from(item.value as List<int>);
+          }
+          break;
+        case ChannelMetadataIdentifier.channelListOrder:
+          if (item.value is int) channelListOrder = item.value as int;
+          break;
+      }
+    }
+
+    return ChannelMetadata(
+      shortDescription: shortDescription,
+      longDescription: longDescription,
+      similarChannels: similarChannels,
+      channelListOrder: channelListOrder,
+      allItems: items,
+    );
+  } catch (e) {
+    logger.w('Error parsing channel metadata: $e');
+    logger.t('-->RAW CHAN META: $cmTagValue');
+    return ChannelMetadata(allItems: []);
+  }
+}
+
+// Parse global metadata
+GlobalMetadata getGlobalMetadata(List<int> gmTagValue) {
+  if (gmTagValue.isEmpty) {
+    return GlobalMetadata(allItems: []);
+  }
+
+  try {
+    List<GlobalMetadataItem> items =
+        GlobalMetadataItem.parseGlobalMetadata(gmTagValue);
+    return GlobalMetadata(allItems: items);
+  } catch (e) {
+    logger.w('Error parsing global metadata: $e');
+    logger.t('-->RAW GLOBAL META: $gmTagValue');
+    return GlobalMetadata(allItems: []);
   }
 }

@@ -10,9 +10,9 @@ import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/sxi_layer.dart';
 import 'package:orbit/ui/channel_info_dialog.dart';
-import 'package:orbit/ui/album_art.dart';
 import 'package:orbit/helpers.dart';
 import 'package:orbit/ui/epg_search.dart';
+import 'package:orbit/ui/channel_list_entry.dart';
 
 class EpgDialog extends StatefulWidget {
   final AppState appState;
@@ -193,9 +193,14 @@ class _EpgDialogState extends State<EpgDialog> {
         children: [
           // Header Row with Refresh and Close buttons
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Now Playing...'),
+              const Expanded(
+                child: Text(
+                  'Now Playing...',
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                ),
+              ),
               IconButton(
                 icon: const Icon(Icons.refresh),
                 tooltip: 'Refresh',
@@ -354,301 +359,125 @@ class _EpgDialogState extends State<EpgDialog> {
                       : (_sidLogoCache[program.sid] ??=
                           Uint8List.fromList(logoList));
 
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      // Hide album art if width is less than 300px (for mobile)
-                      final canDisplayFullWidth = constraints.maxWidth >= 300;
-                      final bool isNowPlaying =
-                          widget.appState.currentChannel ==
-                              program.channelNumber;
-                      final theme = Theme.of(context);
+                  final bool isNowPlaying =
+                      widget.appState.currentChannel == program.channelNumber;
 
-                      return Container(
-                          decoration: BoxDecoration(
-                            color: isNowPlaying
-                                ? theme.colorScheme.primary
-                                    .withValues(alpha: 0.05)
-                                : Colors.transparent,
-                            border: isNowPlaying
-                                ? Border.all(
-                                    color: theme.colorScheme.primary,
-                                    width: 2,
-                                  )
-                                : null,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: ListTile(
-                            contentPadding:
-                                const EdgeInsets.symmetric(horizontal: 16.0),
-                            key: ValueKey<int>(program.sid),
-                            selected: isNowPlaying,
-                            leading: canDisplayFullWidth
-                                ? AlbumArt(
-                                    size: 50,
-                                    cacheWidth: 64,
-                                    cacheHeight: 64,
-                                    imageBytes: trackArt,
-                                    borderRadius: 4.0,
-                                    borderWidth: 1.0,
-                                    placeholder: Icon(
-                                      getCategoryIcon(widget.appState
-                                              .categories[program.catId] ??
-                                          ''),
-                                      size: 22,
-                                    ),
-                                  )
-                                : null,
-                            title: Row(
-                              children: [
-                                Expanded(
-                                  child: Text.rich(
-                                    TextSpan(
-                                      children:
-                                          EpgSearchUtils.buildHighlightedSpans(
-                                        context: context,
-                                        text: program.currentSong,
-                                        query: trimmedQuery,
-                                      ),
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            subtitle: Text.rich(
-                              TextSpan(
-                                children: EpgSearchUtils.buildHighlightedSpans(
-                                  context: context,
-                                  text: program.currentArtist,
-                                  query: trimmedQuery,
-                                ),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: canDisplayFullWidth
-                                ? Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Text(
-                                              'Channel ${program.channelNumber}'),
-                                          if (channelLogo == null)
-                                            Text.rich(
-                                              TextSpan(
-                                                children: EpgSearchUtils
-                                                    .buildHighlightedSpans(
-                                                  context: context,
-                                                  text: program.channelName,
-                                                  query: trimmedQuery,
-                                                  ignoredTokens: EpgSearchUtils
-                                                      .channelNameStopwords,
-                                                ),
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.end,
-                                            )
-                                          else
-                                            Container(
-                                              color: Colors.transparent,
-                                              height: 30,
-                                              width: 80,
-                                              child: Image.memory(
-                                                channelLogo,
-                                                cacheHeight: 128,
-                                                fit: BoxFit.fitHeight,
-                                                gaplessPlayback: true,
-                                                filterQuality:
-                                                    FilterQuality.medium,
-                                                errorBuilder: (_, __, ___) {
-                                                  return Text(
-                                                    program.channelName,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    textAlign: TextAlign.end,
-                                                  );
-                                                },
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                      Row(children: [
-                                        IconButton(
-                                            tooltip: 'View channel info',
-                                            icon: Icon(Icons.info_outline),
-                                            onPressed: () {
-                                              ChannelInfoDialog.show(
-                                                context,
-                                                appState: widget.appState,
-                                                sid: program.sid,
-                                                deviceLayer: widget.deviceLayer,
-                                                onTuneAlign: (channelNumber) {
-                                                  // Align EPG to All Channels, jump to tuned channel
-                                                  setState(() {
-                                                    selectedCategory = null;
-                                                  });
-                                                  // Recompute the currently visible list (category + search)
-                                                  WidgetsBinding.instance
-                                                      .addPostFrameCallback(
-                                                          (_) {
-                                                    // Build base list
-                                                    List<ChannelData> baseList =
-                                                        widget.appState.sidMap
-                                                            .values
-                                                            .toList();
-                                                    baseList.sort((a, b) => a
-                                                        .channelNumber
-                                                        .compareTo(
-                                                            b.channelNumber));
-                                                    if (baseList.length > 2) {
-                                                      baseList =
-                                                          baseList.sublist(2);
-                                                    }
-                                                    if (selectedCategory !=
-                                                        null) {
-                                                      baseList = baseList
-                                                          .where((c) =>
-                                                              c.catId ==
-                                                              selectedCategory)
-                                                          .toList();
-                                                    }
-
-                                                    // Apply search filter
-                                                    final trimmed =
-                                                        searchQuery.trim();
-                                                    final lower =
-                                                        trimmed.toLowerCase();
-                                                    List<ChannelData>
-                                                        visibleList;
-                                                    if (lower.isEmpty) {
-                                                      visibleList = baseList;
-                                                    } else {
-                                                      final isNumeric =
-                                                          int.tryParse(lower) !=
-                                                              null;
-                                                      final results =
-                                                          <_SearchResult>[];
-                                                      final tokens =
-                                                          EpgSearchUtils
-                                                              .tokenizeQuery(
-                                                                  lower);
-                                                      final candidates = isNumeric
-                                                          ? baseList
-                                                          : baseList.where((c) =>
-                                                              EpgSearchUtils
-                                                                  .matchesAllTokens(
-                                                                      c,
-                                                                      tokens));
-                                                      for (final ch
-                                                          in candidates) {
-                                                        final score = EpgSearchUtils
-                                                            .computeSearchScore(
-                                                          ch,
-                                                          lower,
-                                                          isNumeric: isNumeric,
-                                                        );
-                                                        if (score > 0) {
-                                                          results.add(
-                                                            _SearchResult(
-                                                              channel: ch,
-                                                              score: score,
-                                                            ),
-                                                          );
-                                                        }
-                                                      }
-                                                      results.sort((a, b) {
-                                                        final cmp = b.score
-                                                            .compareTo(a.score);
-                                                        if (cmp != 0) {
-                                                          return cmp;
-                                                        }
-                                                        return a.channel
-                                                            .channelNumber
-                                                            .compareTo(b.channel
-                                                                .channelNumber);
-                                                      });
-                                                      visibleList = results
-                                                          .map((r) => r.channel)
-                                                          .toList();
-                                                    }
-
-                                                    final idx = visibleList
-                                                        .indexWhere((c) =>
-                                                            c.channelNumber ==
-                                                            channelNumber);
-                                                    if (idx >= 0) {
-                                                      try {
-                                                        widget
-                                                            .mainListController
-                                                            .jumpToItem(
-                                                          index: idx,
-                                                          scrollController: widget
-                                                              .mainScrollController,
-                                                          alignment: 0.5,
-                                                        );
-                                                      } catch (_) {
-                                                        // If controller isn't ready, ignore
-                                                      }
-                                                    }
-                                                  });
-                                                },
-                                              );
-                                            }),
-                                      ]),
-                                    ],
-                                  )
-                                : Container(
-                                    color: Colors.transparent,
-                                    height: 30,
-                                    width: 50,
-                                    child: channelLogo == null
-                                        ? Text.rich(
-                                            TextSpan(
-                                              children: EpgSearchUtils
-                                                  .buildHighlightedSpans(
-                                                context: context,
-                                                text: program.channelName,
-                                                query: trimmedQuery,
-                                                ignoredTokens: EpgSearchUtils
-                                                    .channelNameStopwords,
-                                              ),
-                                            ),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            textAlign: TextAlign.center,
-                                          )
-                                        : Image.memory(
-                                            channelLogo,
-                                            cacheHeight: 128,
-                                            fit: BoxFit.contain,
-                                            alignment: Alignment.centerRight,
-                                            gaplessPlayback: true,
-                                            filterQuality: FilterQuality.medium,
-                                            errorBuilder: (_, __, ___) {
-                                              return Text(
-                                                program.channelName,
-                                                overflow: TextOverflow.ellipsis,
-                                                textAlign: TextAlign.end,
-                                              );
-                                            },
-                                          ),
-                                  ),
-                            onTap: () {
-                              Navigator.pop(context, index);
-                              final cfgCmd = SXiSelectChannelCommand(
-                                ChanSelectionType.tuneUsingChannelNumber,
-                                program.channelNumber,
-                                0xFF,
-                                Overrides.all(),
-                                AudioRoutingType.routeToAudio,
-                              );
-                              widget.deviceLayer.sendControlCommand(cfgCmd);
-                            },
-                          ));
+                  return ChannelListEntry(
+                    key: ValueKey<int>(program.sid),
+                    isNowPlaying: isNowPlaying,
+                    albumArt: trackArt,
+                    placeholder: Icon(
+                      getCategoryIcon(
+                          widget.appState.categories[program.catId] ?? ''),
+                      size: 22,
+                    ),
+                    titleSpans: EpgSearchUtils.buildHighlightedSpans(
+                      context: context,
+                      text: program.currentSong,
+                      query: trimmedQuery,
+                    ),
+                    subtitleSpans: EpgSearchUtils.buildHighlightedSpans(
+                      context: context,
+                      text: program.currentArtist,
+                      query: trimmedQuery,
+                    ),
+                    channelNumber: program.channelNumber,
+                    channelLogo: channelLogo,
+                    channelNameSpans: EpgSearchUtils.buildHighlightedSpans(
+                      context: context,
+                      text: program.channelName,
+                      query: trimmedQuery,
+                      ignoredTokens: EpgSearchUtils.channelNameStopwords,
+                    ),
+                    infoButton: IconButton(
+                      tooltip: 'View channel info',
+                      icon: const Icon(Icons.info_outline),
+                      onPressed: () {
+                        ChannelInfoDialog.show(
+                          context,
+                          appState: widget.appState,
+                          sid: program.sid,
+                          deviceLayer: widget.deviceLayer,
+                          onTuneAlign: (channelNumber) {
+                            setState(() {
+                              selectedCategory = null;
+                            });
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              List<ChannelData> baseList =
+                                  widget.appState.sidMap.values.toList();
+                              baseList.sort((a, b) =>
+                                  a.channelNumber.compareTo(b.channelNumber));
+                              if (baseList.length > 2) {
+                                baseList = baseList.sublist(2);
+                              }
+                              if (selectedCategory != null) {
+                                baseList = baseList
+                                    .where((c) => c.catId == selectedCategory)
+                                    .toList();
+                              }
+                              final trimmed = searchQuery.trim();
+                              final lower = trimmed.toLowerCase();
+                              List<ChannelData> visibleList;
+                              if (lower.isEmpty) {
+                                visibleList = baseList;
+                              } else {
+                                final isNumeric = int.tryParse(lower) != null;
+                                final results = <_SearchResult>[];
+                                final tokens =
+                                    EpgSearchUtils.tokenizeQuery(lower);
+                                final candidates = isNumeric
+                                    ? baseList
+                                    : baseList.where((c) =>
+                                        EpgSearchUtils.matchesAllTokens(
+                                            c, tokens));
+                                for (final ch in candidates) {
+                                  final score =
+                                      EpgSearchUtils.computeSearchScore(
+                                    ch,
+                                    lower,
+                                    isNumeric: isNumeric,
+                                  );
+                                  if (score > 0) {
+                                    results.add(_SearchResult(
+                                        channel: ch, score: score));
+                                  }
+                                }
+                                results.sort((a, b) {
+                                  final cmp = b.score.compareTo(a.score);
+                                  if (cmp != 0) return cmp;
+                                  return a.channel.channelNumber
+                                      .compareTo(b.channel.channelNumber);
+                                });
+                                visibleList =
+                                    results.map((r) => r.channel).toList();
+                              }
+                              final idx = visibleList.indexWhere(
+                                  (c) => c.channelNumber == channelNumber);
+                              if (idx >= 0) {
+                                try {
+                                  widget.mainListController.jumpToItem(
+                                    index: idx,
+                                    scrollController:
+                                        widget.mainScrollController,
+                                    alignment: 0.5,
+                                  );
+                                } catch (_) {}
+                              }
+                            });
+                          },
+                        );
+                      },
+                    ),
+                    onTap: () {
+                      Navigator.pop(context, index);
+                      final cfgCmd = SXiSelectChannelCommand(
+                        ChanSelectionType.tuneUsingChannelNumber,
+                        program.channelNumber,
+                        0xFF,
+                        Overrides.all(),
+                        AudioRoutingType.routeToAudio,
+                      );
+                      widget.deviceLayer.sendControlCommand(cfgCmd);
                     },
                   );
                 },

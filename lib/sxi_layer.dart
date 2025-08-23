@@ -253,79 +253,26 @@ class SXiLayer {
         break;
 
       case SXiSelectChannelIndication channelSelect:
-        if (channelSelect.tmTagValue.isNotEmpty) {
-          try {
-            List<TrackMetadataItem> trackMetadata =
-                TrackMetadataItem.parseTrackMetadata(channelSelect.tmTagValue);
-
-            int sid = bitCombine(channelSelect.sidMsb, channelSelect.sidLsb);
-            int? songId;
-            int? artistId;
-            for (final item in trackMetadata) {
-              switch (item.identifier) {
-                case TrackMetadataIdentifier.songId:
-                  if (item.value is int) {
-                    songId = item.value as int;
-                  }
-                  break;
-                case TrackMetadataIdentifier.artistId:
-                  if (item.value is int) {
-                    artistId = item.value as int;
-                  }
-                  break;
-                default:
-                  break;
-              }
-            }
-            if (songId != null || artistId != null) {
-              appState.updateTrackIdsForSid(sid,
-                  songId: songId, artistId: artistId);
-            }
-          } catch (e) {
-            logger.w('Error parsing track metadata: $e');
-            logger.t('-->RAW TRACK META: ${channelSelect.tmTagValue}');
-          }
-        }
+        int sid = bitCombine(channelSelect.sidMsb, channelSelect.sidLsb);
+        final channelData = appState.sidMap[sid];
 
         if (channelSelect.cmTagValue.isNotEmpty) {
-          try {
-            List<ChannelMetadataItem> channelMetadata =
-                ChannelMetadataItem.parseChannelMetadata(
-                    channelSelect.cmTagValue);
+          final channelMetadata = getChannelMetadata(channelSelect.cmTagValue);
+          int sid = bitCombine(channelSelect.sidMsb, channelSelect.sidLsb);
 
-            String? shortDesc;
-            String? longDesc;
-            List<int>? similar;
-            for (final item in channelMetadata) {
-              switch (item.identifier) {
-                case ChannelMetadataIdentifier.channelShortDescription:
-                  if (item.value is String) shortDesc = item.value as String;
-                  break;
-                case ChannelMetadataIdentifier.channelLongDescription:
-                  if (item.value is String) longDesc = item.value as String;
-                  break;
-                case ChannelMetadataIdentifier.similarChannelList:
-                  if (item.value is List<int>) {
-                    similar = List<int>.from(item.value as List<int>);
-                  }
-                  break;
-                case ChannelMetadataIdentifier.channelListOrder:
-                  break;
-              }
-            }
-            int sid = bitCombine(channelSelect.sidMsb, channelSelect.sidLsb);
-            if (shortDesc != null || longDesc != null) {
-              appState.updateChannelDescriptions(
-                  sid, shortDesc ?? '', longDesc ?? '');
-            }
-            if (similar != null) {
-              appState.updateSimilarChannels(sid, similar);
-            }
-          } catch (e) {
-            logger.w('Error parsing channel metadata: $e');
-            logger.t('-->RAW CHAN META: ${channelSelect.cmTagValue}');
+          if (channelMetadata.shortDescription != null ||
+              channelMetadata.longDescription != null) {
+            appState.updateChannelDescriptions(
+                sid,
+                channelMetadata.shortDescription ?? '',
+                channelMetadata.longDescription ?? '');
+          }
+          if (channelMetadata.similarChannels != null) {
+            appState.updateSimilarChannels(
+                sid, channelMetadata.similarChannels!);
           }
         }
+
         var indication = IndicationCode.getByValue(channelSelect.indCode);
         appState.isScanActive = indication == IndicationCode.scanNominal;
         appState.isTuneMixActive = indication == IndicationCode.tuneMixNominal;
@@ -336,62 +283,43 @@ class SXiLayer {
               snackbar: false, dismissable: true);
         }
 
-        var sid = bitCombine(channelSelect.sidMsb, channelSelect.sidLsb);
-
         var programIdAsInt = bytesToInt32(channelSelect.programID);
 
         appState.updateNowPlayingWithNewData(
-            channelSelect.chanNameLong,
-            channelSelect.songExtd,
-            channelSelect.artistExtd,
-            channelSelect.catID,
-            bitCombine(channelSelect.chanIDMsb, channelSelect.chanIDLsb),
-            bitCombine(channelSelect.sidMsb, channelSelect.sidLsb),
-            channelSelect.programID,
-            appState.imageMap[sid]?[programIdAsInt] ?? List.empty());
+          channelSelect.chanNameLong,
+          channelSelect.songExtd,
+          channelSelect.artistExtd,
+          channelData?.airingSongId ?? 0,
+          channelData?.airingArtistId ?? 0,
+          channelSelect.catID,
+          bitCombine(channelSelect.chanIDMsb, channelSelect.chanIDLsb),
+          bitCombine(channelSelect.sidMsb, channelSelect.sidLsb),
+          channelSelect.programID,
+          appState.imageMap[sid]?[programIdAsInt] ?? List.empty(),
+        );
         break;
 
       case SXiMetadataIndication metadataUpdate:
-        // Parse extended track metadata using TMI parser
+        int? nowPlayingSongId;
+        int? nowPlayingArtistId;
+        int sid = bitCombine(metadataUpdate.sidMsb, metadataUpdate.sidLsb);
         if (metadataUpdate.tmTagValue.isNotEmpty) {
-          try {
-            List<TrackMetadataItem> trackMetadata =
-                TrackMetadataItem.parseTrackMetadata(metadataUpdate.tmTagValue);
+          final trackMetadata = getTrackMetadata(metadataUpdate.tmTagValue);
 
-            // Persist important TMI fields: songId and artistId
-            int sid = bitCombine(metadataUpdate.sidMsb, metadataUpdate.sidLsb);
-            int? songId;
-            int? artistId;
-            for (final item in trackMetadata) {
-              switch (item.identifier) {
-                case TrackMetadataIdentifier.songId:
-                  if (item.value is int) songId = item.value as int;
-                  break;
-                case TrackMetadataIdentifier.artistId:
-                  if (item.value is int) artistId = item.value as int;
-                  break;
-                default:
-                  break;
-              }
-            }
-            if (songId != null || artistId != null) {
-              appState.updateTrackIdsForSid(sid,
-                  songId: songId, artistId: artistId);
-            }
-          } catch (e) {
-            logger.w('Error parsing track metadata: $e');
-            logger.t('-->RAW TRACK META: ${metadataUpdate.tmTagValue}');
-          }
+          nowPlayingSongId = trackMetadata.songId;
+          nowPlayingArtistId = trackMetadata.artistId;
         }
+
+        appState.updateNowAiringTrackIdsForSid(sid,
+            songId: nowPlayingSongId, artistId: nowPlayingArtistId);
 
         var channelChanged =
             bitCombine(metadataUpdate.chanIDMsb, metadataUpdate.chanIDLsb);
-        var sid = bitCombine(metadataUpdate.sidMsb, metadataUpdate.sidLsb);
 
-        var song = String.fromCharCodes(metadataUpdate.artistExtd);
-        var artist = String.fromCharCodes(metadataUpdate.songExtd);
+        var song = String.fromCharCodes(metadataUpdate.songExtd);
+        var artist = String.fromCharCodes(metadataUpdate.artistExtd);
         var programIdAsInt = bytesToInt32(metadataUpdate.programID);
-        appState.updateChannelData(sid, song, artist, programIdAsInt);
+        appState.updateChannelData(sid, artist, song, programIdAsInt);
 
         if (channelChanged == appState.currentChannel) {
           if (appState.playbackState == AppPlaybackState.live) {
@@ -399,6 +327,8 @@ class SXiLayer {
                 List.empty(),
                 metadataUpdate.songExtd,
                 metadataUpdate.artistExtd,
+                nowPlayingSongId,
+                nowPlayingArtistId,
                 -1,
                 bitCombine(metadataUpdate.chanIDMsb, metadataUpdate.chanIDLsb),
                 bitCombine(metadataUpdate.sidMsb, metadataUpdate.sidLsb),
@@ -406,30 +336,44 @@ class SXiLayer {
                 appState.imageMap[sid]?[programIdAsInt] ?? List.empty());
           }
 
-          logger.i(
-              '''Tuned Channel: Track changed: ${String.fromCharCodes(metadataUpdate.songExtd)} 
-              by ${String.fromCharCodes(metadataUpdate.artistExtd)}''');
+          logger.i('Tuned Channel: Track changed: $song ($nowPlayingSongId) '
+              'by $artist ($nowPlayingArtistId)');
         }
         break;
 
       case SXiInstantReplayPlaybackMetadataIndication playbackMetadataUpdate:
-        logger.t('-->IR PMI: ${playbackMetadataUpdate.toString()}');
+        int? nowPlayingSongId;
+        int? nowPlayingArtistId;
         var indication =
             IndicationCode.getByValue(playbackMetadataUpdate.indCode);
 
         var channelChanged = bitCombine(
             playbackMetadataUpdate.chanIDMsb, playbackMetadataUpdate.chanIDLsb);
 
+        if (playbackMetadataUpdate.tmTagValue.isNotEmpty) {
+          final trackMetadata =
+              getTrackMetadata(playbackMetadataUpdate.tmTagValue);
+
+          if (trackMetadata.songId != null || trackMetadata.artistId != null) {
+            nowPlayingSongId = trackMetadata.songId;
+            nowPlayingArtistId = trackMetadata.artistId;
+          }
+        }
+
         if (channelChanged == appState.currentChannel ||
             indication == IndicationCode.tuneMixNominal) {
           var programIdAsInt = bytesToInt32(playbackMetadataUpdate.programID);
           var sid = bitCombine(
               playbackMetadataUpdate.sidMsb, playbackMetadataUpdate.sidLsb);
+          var song = String.fromCharCodes(playbackMetadataUpdate.songExtd);
+          var artist = String.fromCharCodes(playbackMetadataUpdate.artistExtd);
 
           appState.updateNowPlayingWithNewData(
               playbackMetadataUpdate.chanNameLong,
               playbackMetadataUpdate.songExtd,
               playbackMetadataUpdate.artistExtd,
+              nowPlayingSongId,
+              nowPlayingArtistId,
               playbackMetadataUpdate.catID,
               bitCombine(playbackMetadataUpdate.chanIDMsb,
                   playbackMetadataUpdate.chanIDLsb),
@@ -438,9 +382,53 @@ class SXiLayer {
               playbackMetadataUpdate.programID,
               appState.imageMap[sid]?[programIdAsInt] ?? List.empty());
 
-          logger.d(
-              '''Tuned Channel IR: Track changed: ${String.fromCharCodes(playbackMetadataUpdate.songExtd)}
-              by ${String.fromCharCodes(playbackMetadataUpdate.artistExtd)}''');
+          logger.d('Tuned Channel IR: Track changed: $song ($nowPlayingSongId) '
+              'by $artist ($nowPlayingArtistId)');
+        }
+        break;
+
+      case SXiSeekIndication seekIndication:
+        final indication = IndicationCode.getByValue(seekIndication.indCode);
+        final sid = bitCombine(seekIndication.sidMsb, seekIndication.sidLsb);
+        final channel =
+            bitCombine(seekIndication.chanIDMsb, seekIndication.chanIDLsb);
+
+        if (indication != IndicationCode.nominal &&
+            indication != IndicationCode.seekEnd) {
+          logger.d('Unexpected Seek Match Indication: ${indication.name}');
+          break;
+        }
+
+        final matchedSeekType =
+            TrackMetadataIdentifier.getByValue(seekIndication.matchedTmiTag);
+
+        // Extract matched ID from either direct value or track metadata
+        int? matchedId = _extractMatchedId(seekIndication, matchedSeekType);
+        if (matchedId == null || matchedId == 0) {
+          logger.d('No valid matched ID in Seek Match Indication: $indication');
+          break;
+        }
+
+        logger.d(
+            'Seek Match Indication: $indication on channel: $channel for type: $matchedSeekType');
+
+        // Handle seek events based on indication type and metadata type
+        final isSeekStart = indication == IndicationCode.nominal;
+        final isSong = matchedSeekType == TrackMetadataIdentifier.songId;
+        final isArtist = matchedSeekType == TrackMetadataIdentifier.artistId;
+
+        if (isSeekStart) {
+          if (isSong) {
+            appState.matchedSongSeekStarted(matchedId, sid, channel);
+          } else if (isArtist) {
+            appState.matchedArtistSeekStarted(matchedId, sid, channel);
+          }
+        } else {
+          if (isSong) {
+            appState.matchedSongSeekEnded(matchedId, sid, channel);
+          } else if (isArtist) {
+            appState.matchedArtistSeekEnded(matchedId, sid, channel);
+          }
         }
         break;
 
@@ -653,42 +641,19 @@ class SXiLayer {
         logger.t(channelMetadataString);
 
         if (chanMetadata.cmTagValue.isNotEmpty) {
-          try {
-            List<ChannelMetadataItem> channelMetadata =
-                ChannelMetadataItem.parseChannelMetadata(
-                    chanMetadata.cmTagValue);
+          final channelMetadata = getChannelMetadata(chanMetadata.cmTagValue);
+          int sid = bitCombine(chanMetadata.sidMsb, chanMetadata.sidLsb);
 
-            String? shortDesc;
-            String? longDesc;
-            List<int>? similar;
-            for (final item in channelMetadata) {
-              switch (item.identifier) {
-                case ChannelMetadataIdentifier.channelShortDescription:
-                  if (item.value is String) shortDesc = item.value as String;
-                  break;
-                case ChannelMetadataIdentifier.channelLongDescription:
-                  if (item.value is String) longDesc = item.value as String;
-                  break;
-                case ChannelMetadataIdentifier.similarChannelList:
-                  if (item.value is List<int>) {
-                    similar = List<int>.from(item.value as List<int>);
-                  }
-                  break;
-                case ChannelMetadataIdentifier.channelListOrder:
-                  break;
-              }
-            }
-            int sid = bitCombine(chanMetadata.sidMsb, chanMetadata.sidLsb);
-            if (shortDesc != null || longDesc != null) {
-              appState.updateChannelDescriptions(
-                  sid, shortDesc ?? '', longDesc ?? '');
-            }
-            if (similar != null) {
-              appState.updateSimilarChannels(sid, similar);
-            }
-          } catch (e) {
-            logger.w('Error parsing channel metadata: $e');
-            logger.t('-->RAW CHAN META: ${chanMetadata.cmTagValue}');
+          if (channelMetadata.shortDescription != null ||
+              channelMetadata.longDescription != null) {
+            appState.updateChannelDescriptions(
+                sid,
+                channelMetadata.shortDescription ?? '',
+                channelMetadata.longDescription ?? '');
+          }
+          if (channelMetadata.similarChannels != null) {
+            appState.updateSimilarChannels(
+                sid, channelMetadata.similarChannels!);
           }
         }
 
@@ -703,16 +668,10 @@ class SXiLayer {
         logger.t(globalMetadataString);
 
         if (globalMetadata.gmTagValue.isNotEmpty) {
-          try {
-            final parsed = GlobalMetadataItem.parseGlobalMetadata(
-                globalMetadata.gmTagValue);
-            logger.d('-->PARSED GLOBAL METADATA:');
-            for (var item in parsed) {
-              logger.t('  $item');
-            }
-          } catch (e) {
-            logger.w('Error parsing global metadata: $e');
-            logger.t('-->RAW GLOBAL META: ${globalMetadata.gmTagValue}');
+          final parsedGlobalMetadata =
+              getGlobalMetadata(globalMetadata.gmTagValue);
+          for (var item in parsedGlobalMetadata.allItems) {
+            logger.t('  $item');
           }
         }
 
@@ -756,6 +715,33 @@ class SXiLayer {
     deviceLayer.buildAck(message, additionalAckPayload);
     sxiState = SXiState.sendControlCommand;
     cycleState();
+  }
+
+  int? _extractMatchedId(SXiSeekIndication seekIndication,
+      TrackMetadataIdentifier matchedSeekType) {
+    // Try direct value from matchedTmiValue first (prefer 32-bit when present)
+    if (seekIndication.matchedTmiValue.length >= 4) {
+      final v = seekIndication.matchedTmiValue;
+      final matchedId = (v[0] << 24) | (v[1] << 16) | (v[2] << 8) | (v[3]);
+      return matchedId == 0 ? null : matchedId;
+    } else if (seekIndication.matchedTmiValue.length >= 2) {
+      final matchedId = bitCombine(
+          seekIndication.matchedTmiValue[0], seekIndication.matchedTmiValue[1]);
+      return matchedId == 0 ? null : matchedId;
+    }
+
+    // Fall back to extracting from track metadata
+    try {
+      final matchedTrackMetadata = getTrackMetadata(seekIndication.tmTagValue);
+
+      return switch (matchedSeekType) {
+        TrackMetadataIdentifier.songId => matchedTrackMetadata.songId,
+        TrackMetadataIdentifier.artistId => matchedTrackMetadata.artistId,
+        _ => null,
+      };
+    } catch (_) {
+      return null;
+    }
   }
 }
 

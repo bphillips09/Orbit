@@ -573,6 +573,93 @@ class SXiLookAheadMetadataIndication extends SXiPayload {
   }
 }
 
+// Seek (favorites match) indication
+class SXiSeekIndication extends SXiPayload {
+  final int indCode;
+  final int chanIDMsb;
+  final int chanIDLsb;
+  final int sidMsb;
+  final int sidLsb;
+  final int chanAttributes;
+  final Uint8List programID;
+  final int seekMonitorID;
+  final int matchedTmiTag;
+  final List<int> matchedTmiValue;
+  final int extTrackMetadataCnt;
+  final List<int> tmTagValue;
+
+  SXiSeekIndication.fromBytes(List<int> frame)
+      : indCode = frame[3],
+        chanIDMsb = frame[4],
+        chanIDLsb = frame[5],
+        sidMsb = frame[6],
+        sidLsb = frame[7],
+        chanAttributes = frame[8],
+        programID = Uint8List.fromList(frame.sublist(9, 13)),
+        seekMonitorID = frame[13],
+        matchedTmiTag = (frame[14] << 8) | frame[15],
+        matchedTmiValue = (() {
+          // Choose slice length by tag; preserve 32-bit values when present
+          final int valueStart = 16;
+          if (valueStart > frame.length) return <int>[];
+          final tag = (frame[14] << 8) | frame[15];
+          switch (TrackMetadataIdentifier.getByValue(tag)) {
+            case TrackMetadataIdentifier.artistId:
+              if (valueStart + 3 < frame.length) {
+                // Prefer full 4-byte artist ID if present
+                return frame.sublist(valueStart, valueStart + 4);
+              } else if (valueStart + 1 < frame.length) {
+                return frame.sublist(valueStart, valueStart + 2);
+              }
+              return <int>[];
+            case TrackMetadataIdentifier.songId:
+              if (valueStart + 3 < frame.length) {
+                return frame.sublist(valueStart, valueStart + 4);
+              }
+              return <int>[];
+            default:
+              final int afterMatchedIndex = advanceOverTmiItems(frame, 14, 1);
+              if (afterMatchedIndex <= valueStart ||
+                  valueStart > frame.length) {
+                return <int>[];
+              }
+              final int end = afterMatchedIndex.clamp(0, frame.length);
+              return frame.sublist(valueStart, end);
+          }
+        })(),
+        extTrackMetadataCnt = (() {
+          final int i = advanceOverTmiItems(frame, 14, 1);
+          return (i < frame.length) ? frame[i] : 0;
+        })(),
+        tmTagValue = (() {
+          final int i = advanceOverTmiItems(frame, 14, 1);
+          return (i < frame.length) ? readTmiBlockFrom(i, frame) : <int>[];
+        })(),
+        super(frame[0], frame[1], frame[2]);
+
+  @override
+  List<int> getParameters() {
+    final List<int> matchedHeaderAndValue = [
+      (matchedTmiTag >> 8) & 0xFF,
+      matchedTmiTag & 0xFF,
+      ...matchedTmiValue,
+    ];
+    return [
+      indCode,
+      chanIDMsb,
+      chanIDLsb,
+      sidMsb,
+      sidLsb,
+      chanAttributes,
+      ...programID,
+      seekMonitorID,
+      ...matchedHeaderAndValue,
+      extTrackMetadataCnt,
+      ...tmTagValue,
+    ];
+  }
+}
+
 // Instant replay playback information indication
 class SXiInstantReplayPlaybackInfoIndication extends SXiPayload {
   final int indCode;
@@ -807,7 +894,7 @@ class SXiInstantReplayRecordInfoIndication extends SXiPayload {
   }
 }
 
-// Power mode indication (I don't think this is used)
+// Power mode indication
 class SXiPowerModeIndication extends SXiPayload {
   final int indCode;
 
@@ -1572,6 +1659,42 @@ class SXiDataPacketIndication extends SXiPayload {
       packetLenMsb,
       packetLenLsb,
       ...dataPacket
+    ];
+  }
+}
+
+class SXiAuthenticationIndication extends SXiPayload {
+  final int indCode;
+  final List<int> data;
+
+  SXiAuthenticationIndication.fromBytes(List<int> frame)
+      : indCode = frame[3],
+        data = frame.sublist(4),
+        super(frame[0], frame[1], frame[2]);
+
+  @override
+  List<int> getParameters() {
+    return [
+      indCode,
+      ...data,
+    ];
+  }
+}
+
+class SXiIPAuthenticationIndication extends SXiPayload {
+  final int indCode;
+  final List<int> data;
+
+  SXiIPAuthenticationIndication.fromBytes(List<int> frame)
+      : indCode = frame[3],
+        data = frame.sublist(4),
+        super(frame[0], frame[1], frame[2]);
+
+  @override
+  List<int> getParameters() {
+    return [
+      indCode,
+      ...data,
     ];
   }
 }

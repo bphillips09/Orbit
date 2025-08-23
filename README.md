@@ -20,8 +20,8 @@ Orbit connects to an [SXV300][sxv300-link] tuner and controls it using the SXi p
 | Presets Scan | ✅ Supported |
 | Presets Mix | ✅ Supported |
 | Restart song on tune | ✅ Supported |
-| Song / Artist alerts | ⏳ Coming soon |
-| Sports / Traffic alerts | ⏳ Coming soon |
+| Song / Artist alerts | ✅ Supported |
+| Sports alerts | ⏳ Planned |
 | Travel Link (downloaded from satellite) | ❌ Not yet supported |
 | Internet Streaming | ❌ Not supported |
 

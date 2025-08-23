@@ -120,24 +120,27 @@ class _PresetsEditorDialogState extends State<PresetsEditorDialog> {
       },
       child: AlertDialog(
         title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Edit Presets'),
-            Row(children: [
-              TextButton(
-                onPressed: _saveAndClose,
-                child: const Text('Save'),
+            const Expanded(
+              child: Text(
+                'Edit Presets',
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
               ),
-              IconButton(
-                tooltip: 'Cancel',
-                icon: const Icon(Icons.close),
-                onPressed: () async {
-                  if (await _confirmDiscardIfNeeded()) {
-                    if (context.mounted) Navigator.of(context).pop(false);
-                  }
-                },
-              ),
-            ])
+            ),
+            TextButton(
+              onPressed: _saveAndClose,
+              child: const Text('Save'),
+            ),
+            IconButton(
+              tooltip: 'Cancel',
+              icon: const Icon(Icons.close),
+              onPressed: () async {
+                if (await _confirmDiscardIfNeeded()) {
+                  if (context.mounted) Navigator.of(context).pop(false);
+                }
+              },
+            ),
           ],
         ),
         content: SizedBox(
@@ -181,25 +184,7 @@ class _PresetsEditorDialogState extends State<PresetsEditorDialog> {
                         : (_logoCache[preset.sid] ??=
                             Uint8List.fromList(rawLogo));
 
-                    Widget leading;
-                    if (logoBytes != null) {
-                      leading = SizedBox(
-                        width: 56,
-                        height: 36,
-                        child: Image.memory(
-                          logoBytes,
-                          cacheHeight: 128,
-                          fit: BoxFit.contain,
-                          gaplessPlayback: true,
-                          filterQuality: FilterQuality.medium,
-                          errorBuilder: (_, __, ___) {
-                            return _numberBadge(theme, index);
-                          },
-                        ),
-                      );
-                    } else {
-                      leading = _numberBadge(theme, index);
-                    }
+                    Widget leading = _numberBadge(theme, index);
 
                     return ListTile(
                       key: ObjectKey(preset),
@@ -218,7 +203,7 @@ class _PresetsEditorDialogState extends State<PresetsEditorDialog> {
                       subtitle: isEmpty
                           ? null
                           : Text(
-                              '#${preset.channelNumber} • ${preset.artist} — ${preset.song}',
+                              'Ch. ${preset.channelNumber} • ${preset.artist} — ${preset.song}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
@@ -228,6 +213,23 @@ class _PresetsEditorDialogState extends State<PresetsEditorDialog> {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (logoBytes != null)
+                            SizedBox(
+                              width: 56,
+                              height: 36,
+                              child: Image.memory(
+                                logoBytes,
+                                cacheHeight: 128,
+                                fit: BoxFit.contain,
+                                gaplessPlayback: true,
+                                filterQuality: FilterQuality.medium,
+                                errorBuilder: (_, __, ___) {
+                                  return const SizedBox.shrink();
+                                },
+                              ),
+                            ),
+                          if (logoBytes != null && !isEmpty)
+                            const SizedBox(width: 8),
                           if (!isEmpty)
                             IconButton(
                               icon: const Icon(Icons.delete_outline),

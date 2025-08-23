@@ -53,28 +53,28 @@ class SXiConfigureModuleCommand extends SXiPayload {
   }
 }
 
-class SXiExtendedMetadataMonitorCommand extends SXiPayload {
+class SXiMonitorExtendedMetadataCommand extends SXiPayload {
   MetadataMonitorType monitorSelection;
   MonitorChangeType monitorChangeType;
   List<int> emi;
 
-  SXiExtendedMetadataMonitorCommand(
+  SXiMonitorExtendedMetadataCommand(
       this.monitorSelection, this.monitorChangeType, this.emi)
       : super(0x00, 0xA2, 0);
 
-  SXiExtendedMetadataMonitorCommand.trackMetadata(
+  SXiMonitorExtendedMetadataCommand.trackMetadata(
       MetadataMonitorType monitorType,
       MonitorChangeType changeType,
       List<TrackMetadataIdentifier> identifiers)
       : this(monitorType, changeType, identifiers.map((e) => e.value).toList());
 
-  SXiExtendedMetadataMonitorCommand.channelMetadata(
+  SXiMonitorExtendedMetadataCommand.channelMetadata(
       MetadataMonitorType monitorType,
       MonitorChangeType changeType,
       List<ChannelMetadataIdentifier> identifiers)
       : this(monitorType, changeType, identifiers.map((e) => e.value).toList());
 
-  SXiExtendedMetadataMonitorCommand.globalMetadata(
+  SXiMonitorExtendedMetadataCommand.globalMetadata(
       MonitorChangeType changeType, List<GlobalMetadataIdentifier> identifiers)
       : this(MetadataMonitorType.extendedGlobalMetadata, changeType,
             identifiers.map((e) => e.value).toList());
@@ -129,7 +129,7 @@ class SXiExtendedMetadataMonitorCommand extends SXiPayload {
 class SXiPowerModeCommand extends SXiPayload {
   bool powerOn;
 
-  SXiPowerModeCommand(this.powerOn) : super(0x00, 0x33, 0);
+  SXiPowerModeCommand(this.powerOn) : super(0x00, 0x21, 0);
 
   @override
   List<int> getParameters() {
@@ -182,7 +182,7 @@ class SXiListChannelAttributesCommand extends SXiPayload {
 }
 
 class SXiConfigureChannelSelectionCommand extends SXiPayload {
-  int playPoint;
+  PlayPoint playPoint;
   int playSeconds;
   int channelScanInclude;
   int channelScanExclude;
@@ -198,7 +198,7 @@ class SXiConfigureChannelSelectionCommand extends SXiPayload {
 
     return [
       0,
-      playPoint,
+      playPoint.value,
       playSeconds,
       chanInclude.$1,
       chanInclude.$2,
@@ -290,6 +290,138 @@ class SXiAudioVolumeCommand extends SXiPayload {
   }
 }
 
+class SXiMonitorSeekCommand extends SXiPayload {
+  SeekMonitorType seekMonitorID;
+  MonitorChangeType monitorChangeType;
+  TrackMetadataIdentifier monitorTMI;
+  int monitorValueCount;
+  int monitorValueLength;
+  List<int> monitorValues;
+  int reportTMICount;
+  List<int> reportTMI;
+  SeekControlType seekControl;
+
+  SXiMonitorSeekCommand(
+    this.seekMonitorID,
+    this.monitorChangeType,
+    this.monitorTMI,
+    this.monitorValueCount,
+    this.monitorValueLength,
+    this.monitorValues,
+    this.reportTMICount,
+    this.reportTMI,
+    this.seekControl,
+  ) : super(0x03, 0x04, 0);
+
+  // Factory constructor for song monitoring
+  SXiMonitorSeekCommand.songMonitor({
+    required MonitorChangeType monitorChangeType,
+    required List<int> songIDs,
+    required SeekControlType seekControl,
+    SeekMonitorType monitorSlot = SeekMonitorType.songMonitor1,
+  }) : this(
+          monitorSlot,
+          monitorChangeType,
+          TrackMetadataIdentifier.songId,
+          songIDs.length,
+          4,
+          songIDs,
+          0,
+          [],
+          seekControl,
+        );
+
+  // Factory constructor for artist monitoring
+  SXiMonitorSeekCommand.artistMonitor({
+    required MonitorChangeType monitorChangeType,
+    required List<int> artistIDs,
+    required SeekControlType seekControl,
+    SeekMonitorType monitorSlot = SeekMonitorType.artistMonitor1,
+  }) : this(
+          monitorSlot,
+          monitorChangeType,
+          TrackMetadataIdentifier.artistId,
+          artistIDs.length,
+          4,
+          artistIDs,
+          1,
+          [TrackMetadataIdentifier.songName.value],
+          seekControl,
+        );
+
+  // Factory constructor for disabling all monitors
+  SXiMonitorSeekCommand.disableAll({
+    required SeekMonitorType seekMonitorID,
+  }) : this(
+          seekMonitorID,
+          MonitorChangeType.dontMonitorAll,
+          TrackMetadataIdentifier.songId,
+          0,
+          0,
+          [],
+          0,
+          [],
+          SeekControlType.enableSeekEndAndImmediate,
+        );
+
+  @override
+  List<int> getParameters() {
+    // Cap maximum counts to match radio behavior (60 values, 32 report tags)
+    const int maxMonitorValues = 60;
+    const int maxReportTmis = 32;
+    final List<int> valuesToSend = monitorValues.length > maxMonitorValues
+        ? monitorValues.take(maxMonitorValues).toList()
+        : monitorValues;
+    final List<int> reportListToSend = reportTMI.length > maxReportTmis
+        ? reportTMI.take(maxReportTmis).toList()
+        : reportTMI;
+
+    List<int> params = [
+      seekMonitorID.value,
+      monitorChangeType.value,
+      (monitorTMI.value >> 8) & 0xFF,
+      monitorTMI.value & 0xFF,
+      valuesToSend.length,
+      monitorValueLength,
+    ];
+
+    // Add monitor values with byte conversion
+    for (int value in valuesToSend) {
+      if (monitorValueLength == 4) {
+        params.addAll([
+          (value >> 24) & 0xFF,
+          (value >> 16) & 0xFF,
+          (value >> 8) & 0xFF,
+          value & 0xFF,
+        ]);
+      } else if (monitorValueLength == 2) {
+        params.addAll([
+          (value >> 8) & 0xFF,
+          value & 0xFF,
+        ]);
+      } else {
+        params.add(value & 0xFF);
+      }
+    }
+
+    // Report TMI list: write count, then each 16-bit identifier
+    params.add(reportListToSend.length);
+    for (final tmi in reportListToSend) {
+      params.add((tmi >> 8) & 0xFF);
+      params.add(tmi & 0xFF);
+    }
+
+    params.add(seekControl.value);
+
+    return params;
+  }
+
+  @override
+  String toString() {
+    return 'SXiMonitorSeekCommand(seekMonitorID: $seekMonitorID, monitorChangeType: $monitorChangeType, monitorTMI: $monitorTMI, monitorValueCount: $monitorValueCount, monitorValueLength: $monitorValueLength, monitorValues: $monitorValues, reportTMICount: $reportTMICount, reportTMI: $reportTMI, seekControl: $seekControl)';
+  }
+}
+
 class SXiMonitorFeatureCommand extends SXiPayload {
   MonitorChangeType monitorOperation;
   List<FeatureMonitorType> featureMonitorIDs;
@@ -374,5 +506,36 @@ class SXiPackageCommand extends SXiPayload {
   @override
   List<int> getParameters() {
     return [option.value, index];
+  }
+}
+
+class SXiDeviceIPAuthenticationCommand extends SXiPayload {
+  bool enabled;
+
+  SXiDeviceIPAuthenticationCommand(this.enabled) : super(0x00, 0xF0, 0);
+
+  @override
+  List<int> getParameters() {
+    return [enabled ? 1 : 0];
+  }
+}
+
+class SXiDeviceAuthenticationCommand extends SXiPayload {
+  bool enabled;
+
+  SXiDeviceAuthenticationCommand(this.enabled) : super(0x00, 0xF1, 0);
+
+  @override
+  List<int> getParameters() {
+    return [enabled ? 1 : 0];
+  }
+}
+
+class SXiPingCommand extends SXiPayload {
+  SXiPingCommand() : super(0x00, 0xE0, 0);
+
+  @override
+  List<int> getParameters() {
+    return [];
   }
 }

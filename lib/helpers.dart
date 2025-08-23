@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 // Detect landscape orientation
 bool isLandscape(BuildContext context) {
   final size = MediaQuery.of(context).size;
-  return size.width > size.height / 1.2;
+  return size.width > size.height / 1.1;
 }
 
 // Standardized signal icon

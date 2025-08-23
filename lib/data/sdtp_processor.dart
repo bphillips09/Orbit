@@ -54,7 +54,7 @@ class SDTPProcessor {
         // This literally has never worked once, I think it's always in order
         if (received != expected && packet.header.soa != 1) {
           logger.d('DMI $dmi: Expected $expected packets, received $received.');
-          logger.w(
+          logger.d(
               'Warning: Packet count mismatch for DMI $dmi. Attempting reordering...');
           activeDMIPackets[dmi]!
               .sort((a, b) => a.header.psi.compareTo(b.header.psi));

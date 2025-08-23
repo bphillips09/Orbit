@@ -10,6 +10,7 @@ import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:orbit/ui/preset.dart';
 import 'package:orbit/logging.dart';
+import 'package:orbit/data/favorite.dart';
 
 class StorageData {
   late Database _mainDb;
@@ -65,6 +66,13 @@ class StorageData {
           }
         }
         break;
+      case SaveDataType.favorites:
+        if (value is List<Favorite>) {
+          record[key] = value.map((f) => f.toMap()).toList();
+        } else {
+          record[key] = [];
+        }
+        break;
       case SaveDataType.lastSid:
       case SaveDataType.lastPort:
       case SaveDataType.lastAudioDevice:
@@ -72,6 +80,7 @@ class StorageData {
       case SaveDataType.enableAudio:
       case SaveDataType.tuneStart:
       case SaveDataType.sliderSnapping:
+      case SaveDataType.showOnAirFavoritesPrompt:
       case SaveDataType.debugMode:
       case SaveDataType.themeMode:
       case SaveDataType.uiScale:
@@ -108,6 +117,11 @@ class StorageData {
                   channelName: data['channelName'] as String,
                 ))
             .toList();
+      case SaveDataType.favorites:
+        final List<dynamic> list = (record[key] as List?) ?? const [];
+        return list
+            .map((e) => Favorite.fromMap(Map<String, dynamic>.from(e)))
+            .toList();
       case SaveDataType.lastSid:
       case SaveDataType.lastPort:
       case SaveDataType.lastAudioDevice:
@@ -115,6 +129,7 @@ class StorageData {
       case SaveDataType.enableAudio:
       case SaveDataType.tuneStart:
       case SaveDataType.sliderSnapping:
+      case SaveDataType.showOnAirFavoritesPrompt:
       case SaveDataType.debugMode:
       case SaveDataType.themeMode:
       case SaveDataType.uiScale:
@@ -231,6 +246,7 @@ class StorageData {
 enum SaveDataType {
   eq,
   presets,
+  favorites,
   lastSid,
   lastPort,
   lastAudioDevice,
@@ -238,6 +254,7 @@ enum SaveDataType {
   enableAudio,
   tuneStart,
   sliderSnapping,
+  showOnAirFavoritesPrompt,
   debugMode,
   themeMode,
   uiScale,

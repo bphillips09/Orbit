@@ -62,18 +62,25 @@ class _SignalQualityDialogState extends State<SignalQualityDialog> {
       builder: (context, appState, child) {
         return AlertDialog(
           title: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Icon(
-                    getSignalIcon(appState.signalQuality,
-                        isAntennaConnected: appState.isAntennaConnected),
-                    color: _getSignalColor(appState.signalQuality, theme),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text('Signal Quality'),
-                ],
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(
+                      getSignalIcon(appState.signalQuality,
+                          isAntennaConnected: appState.isAntennaConnected),
+                      color: _getSignalColor(appState.signalQuality, theme),
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Signal Quality',
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
+                      ),
+                    ),
+                  ],
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.close),

@@ -13,6 +13,8 @@ import 'package:orbit/helpers.dart';
 import 'package:orbit/main.dart';
 import 'package:orbit/storage/storage_data.dart';
 import 'package:orbit/ui/presets_editor.dart';
+import 'package:orbit/ui/favorites_manager.dart';
+import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/signal_bar.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
@@ -26,11 +28,11 @@ import 'dart:convert';
 class SettingsPage extends StatelessWidget {
   final MainPageState mainPage;
   static final Map<String, GlobalKey<_CollapsibleSectionState>> _sectionKeys = {
-    'Connection': GlobalKey<_CollapsibleSectionState>(),
-    'Audio': GlobalKey<_CollapsibleSectionState>(),
     'Radio': GlobalKey<_CollapsibleSectionState>(),
     'Appearance': GlobalKey<_CollapsibleSectionState>(),
+    'Connection': GlobalKey<_CollapsibleSectionState>(),
     'Equalizer': GlobalKey<_CollapsibleSectionState>(),
+    'Audio': GlobalKey<_CollapsibleSectionState>(),
     'System Info': GlobalKey<_CollapsibleSectionState>(),
     'Data': GlobalKey<_CollapsibleSectionState>(),
     'Logging': GlobalKey<_CollapsibleSectionState>(),
@@ -55,12 +57,16 @@ class SettingsPage extends StatelessWidget {
             tooltip: 'Expand/Collapse All',
             icon: const Icon(Icons.unfold_more),
             onPressed: () {
-              final anyCollapsed = _sectionKeys.values
-                  .any((k) => (k.currentState?.isExpanded ?? false) == false);
+              final states = _sectionKeys.values
+                  .map((k) => k.currentState)
+                  .whereType<_CollapsibleSectionState>()
+                  .toList();
+              if (states.isEmpty) return;
+              final anyCollapsed = states.any((s) => !s.isExpanded);
               final newState =
                   anyCollapsed; // Expand if any collapsed, else collapse
-              for (final key in _sectionKeys.values) {
-                key.currentState?.setExpanded(newState);
+              for (final s in states) {
+                s.setExpanded(newState);
               }
             },
           ),
@@ -71,6 +77,108 @@ class SettingsPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _buildSection(
+              context,
+              'Radio',
+              Icons.radio,
+              [
+                _buildSettingTile(
+                  context,
+                  'Presets',
+                  'Edit, reorder, or delete presets',
+                  Icons.star,
+                  onTap: () async {
+                    final appState =
+                        Provider.of<AppState>(context, listen: false);
+                    final saved = await PresetsEditorDialogHelper.show(
+                      context: context,
+                      appState: appState,
+                      mainPage: mainPage,
+                    );
+                    if (saved && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Presets updated.')),
+                      );
+                    }
+                  },
+                ),
+                _buildSettingTile(
+                  context,
+                  'Favorites',
+                  'View and edit favorites',
+                  Icons.favorite,
+                  onTap: () async {
+                    final appState =
+                        Provider.of<AppState>(context, listen: false);
+                    await FavoritesManagerDialogHelper.show(
+                      context: context,
+                      appState: appState,
+                      deviceLayer: mainPage.deviceLayer,
+                    );
+                  },
+                ),
+                _buildSettingTile(
+                  context,
+                  'Favorites On Air',
+                  'View and tune to on-air favorites',
+                  Icons.play_circle_outline,
+                  onTap: () async {
+                    final appState =
+                        Provider.of<AppState>(context, listen: false);
+                    await FavoritesOnAirDialogHelper.show(
+                      context: context,
+                      appState: appState,
+                      deviceLayer: mainPage.deviceLayer,
+                    );
+                  },
+                ),
+                _buildSwitchTile(
+                  context,
+                  'Show On-Air Favorites Button',
+                  'Show quick access button when favorites go on-air',
+                  Icons.favorite_outline,
+                  value: appState.showOnAirFavoritesPrompt,
+                  onChanged: (value) {
+                    appState.updateShowOnAirFavoritesPrompt(value);
+                  },
+                ),
+                _buildSwitchTile(
+                  context,
+                  'Restart Song on Tune',
+                  'Start at the beginning of the song when tuning',
+                  Icons.fast_rewind,
+                  value: appState.tuneStart,
+                  onChanged: (value) {
+                    appState.updateTuneStart(value);
+                    final cfgCmd = SXiConfigureChannelSelectionCommand(
+                        value ? PlayPoint.auto : PlayPoint.live, 5, 3, 1);
+                    mainPage.deviceLayer.sendControlCommand(cfgCmd);
+                  },
+                ),
+                _buildSwitchTile(
+                  context,
+                  'Slider Track Snapping',
+                  'Snap to track boundaries when dragging the slider',
+                  Icons.lock_clock,
+                  value: appState.sliderSnapping,
+                  onChanged: (value) {
+                    appState.updateSliderSnapping(value);
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: sectionSpacing),
+            _buildSection(
+              context,
+              'Appearance',
+              Icons.palette,
+              [
+                _buildThemeSelector(context, appState),
+                const SizedBox(height: 8),
+                _buildScaleSelector(context, appState),
+              ],
+            ),
+            const SizedBox(height: sectionSpacing),
             _buildSection(
               context,
               'Connection',
@@ -125,6 +233,15 @@ class SettingsPage extends StatelessWidget {
               'Audio',
               Icons.volume_up,
               [
+                _CollapsibleSection(
+                  title: 'Equalizer',
+                  icon: Icons.tune,
+                  initiallyExpanded: false,
+                  isSubsection: true,
+                  children: [
+                    _buildEqualizerWidget(context, mainPage, appState),
+                  ],
+                ),
                 _buildSwitchTile(
                   context,
                   'Use App for Audio Playback',
@@ -159,6 +276,7 @@ class SettingsPage extends StatelessWidget {
                     }
                   },
                 ),
+                const SizedBox(height: 8),
                 if (appState.enableAudio) ...[
                   _buildSampleRateSelector(context, appState),
                   _buildSettingTile(
@@ -180,77 +298,6 @@ class SettingsPage extends StatelessWidget {
                     isDestructive: true,
                   ),
                 ],
-              ],
-            ),
-            const SizedBox(height: sectionSpacing),
-            _buildSection(
-              context,
-              'Radio',
-              Icons.radio,
-              [
-                _buildSettingTile(
-                  context,
-                  'Presets',
-                  'Edit, reorder, or delete presets',
-                  Icons.star,
-                  onTap: () async {
-                    final appState =
-                        Provider.of<AppState>(context, listen: false);
-                    final saved = await PresetsEditorDialogHelper.show(
-                      context: context,
-                      appState: appState,
-                      mainPage: mainPage,
-                    );
-                    if (saved && context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Presets updated.')),
-                      );
-                    }
-                  },
-                ),
-                _buildSwitchTile(
-                  context,
-                  'TuneStart',
-                  'Start at the beginning of the song when tuning',
-                  Icons.fast_rewind,
-                  value: appState.tuneStart,
-                  onChanged: (value) {
-                    appState.updateTuneStart(value);
-                    final cfgCmd = SXiConfigureChannelSelectionCommand(
-                        value ? 2 : 0, 6, 3, 1);
-                    mainPage.deviceLayer.sendControlCommand(cfgCmd);
-                  },
-                ),
-                _buildSwitchTile(
-                  context,
-                  'Slider Track Snapping',
-                  'Snap to track boundaries when dragging the slider',
-                  Icons.lock_clock,
-                  value: appState.sliderSnapping,
-                  onChanged: (value) {
-                    appState.updateSliderSnapping(value);
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: sectionSpacing),
-            _buildSection(
-              context,
-              'Appearance',
-              Icons.palette,
-              [
-                _buildThemeSelector(context, appState),
-                const SizedBox(height: 8),
-                _buildScaleSelector(context, appState),
-              ],
-            ),
-            const SizedBox(height: sectionSpacing),
-            _buildSection(
-              context,
-              'Equalizer',
-              Icons.tune,
-              [
-                _buildEqualizerWidget(context, mainPage, appState),
               ],
             ),
             const SizedBox(height: sectionSpacing),
@@ -288,40 +335,40 @@ class SettingsPage extends StatelessWidget {
             const SizedBox(height: sectionSpacing),
             _buildSection(
               context,
-              'Logging',
-              Icons.list_alt_rounded,
-              [
-                _buildSettingTile(
-                  context,
-                  'Log Level',
-                  _logLevelLabel(appState.logLevel),
-                  Icons.report,
-                  onTap: () => _showLogLevelDialog(context),
-                ),
-                if (!kIsWeb) ...[
-                  _buildSettingTile(
-                    context,
-                    'View Log',
-                    'Open a scrollable log viewer',
-                    Icons.article_outlined,
-                    onTap: () => _showLogViewer(context),
-                  ),
-                  _buildSettingTile(
-                    context,
-                    'Open Log File',
-                    'Open the log in the system viewer',
-                    Icons.description_outlined,
-                    onTap: () => _openLogFile(),
-                  ),
-                ]
-              ],
-            ),
-            const SizedBox(height: sectionSpacing),
-            _buildSection(
-              context,
               'Debug',
               Icons.developer_mode,
               [
+                _CollapsibleSection(
+                  title: 'Logging',
+                  icon: Icons.list_alt_rounded,
+                  initiallyExpanded: false,
+                  isSubsection: true,
+                  children: [
+                    _buildSettingTile(
+                      context,
+                      'Log Level',
+                      _logLevelLabel(appState.logLevel),
+                      Icons.report,
+                      onTap: () => _showLogLevelDialog(context),
+                    ),
+                    if (!kIsWeb) ...[
+                      _buildSettingTile(
+                        context,
+                        'View Log',
+                        'Open a scrollable log viewer',
+                        Icons.article_outlined,
+                        onTap: () => _showLogViewer(context),
+                      ),
+                      _buildSettingTile(
+                        context,
+                        'Open Log File',
+                        'Open the log in the system viewer',
+                        Icons.description_outlined,
+                        onTap: () => _openLogFile(),
+                      ),
+                    ]
+                  ],
+                ),
                 _buildSwitchTile(
                   context,
                   'Debug Mode',
@@ -340,6 +387,15 @@ class SettingsPage extends StatelessWidget {
                     Icons.link,
                     value: appState.linkTraceEnabled,
                     onChanged: (value) {
+                      if (value) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              backgroundColor: Colors.yellow,
+                              duration: Duration(seconds: 10),
+                              content: Text(
+                                  'Link Trace could be huge! Please remember to disable it after use.')),
+                        );
+                      }
                       appState.updateLinkTraceEnabled(value);
                     },
                   ),
@@ -394,6 +450,38 @@ class SettingsPage extends StatelessWidget {
                     Icons.volume_off,
                     onTap: () {
                       mainPage.audioController.stopAudioThread();
+                    },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Ping Device',
+                    'Send a ping command to the device',
+                    Icons.wifi,
+                    onTap: () {
+                      mainPage.deviceLayer.sendControlCommand(SXiPingCommand());
+                    },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Power Off Device',
+                    'Requires unplugging the device to turn back on',
+                    Icons.power_settings_new,
+                    onTap: () {
+                      mainPage.deviceLayer
+                          .sendControlCommand(SXiPowerModeCommand(false));
+                    },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Stop Monitoring Data Services',
+                    'Stop monitoring data services',
+                    Icons.stop,
+                    onTap: () {
+                      mainPage.deviceLayer.sendControlCommand(
+                          SXiMonitorDataServiceCommand(
+                              DataServiceMonitorUpdateType
+                                  .stopMonitorForAllServices,
+                              DataServiceIdentifier.none));
                     },
                   ),
                 ],
@@ -623,12 +711,14 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
-  Widget _buildSection(BuildContext context, String title, IconData icon,
-      List<Widget> children) {
+  Widget _buildSection(
+      BuildContext context, String title, IconData icon, List<Widget> children,
+      {bool initiallyExpanded = false}) {
     return _CollapsibleSection(
       key: _sectionKeys[title] ?? ValueKey<String>(title),
       title: title,
       icon: icon,
+      initiallyExpanded: initiallyExpanded,
       children: children,
     );
   }
@@ -641,13 +731,11 @@ class SettingsPage extends StatelessWidget {
       builder: (context, snapshot) {
         final String appName = 'Orbit';
         final String version = snapshot.data?.version ?? '—';
-        final String build = snapshot.data?.buildNumber ?? '';
         final DateTime? installDate = snapshot.data?.installTime;
         final String installDateString = installDate != null
             ? 'Installed: ${installDate.toLocal().toString()}'
             : '';
-        final String versionLabel =
-            build.isNotEmpty ? 'v$version ($build)' : 'v$version';
+        final String versionLabel = 'v$version';
 
         return Container(
           decoration: BoxDecoration(
@@ -1603,9 +1691,14 @@ class SettingsPage extends StatelessWidget {
           builder: (BuildContext context, StateSetter setStateDialog) {
             return AlertDialog(
               title: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Select Audio Input Device'),
+                  const Expanded(
+                    child: Text(
+                      'Select Audio Input Device',
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                    ),
+                  ),
                   IconButton(
                     icon: const Icon(Icons.refresh),
                     tooltip: 'Refresh Devices',
@@ -1821,14 +1914,18 @@ class SettingsPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: [
-              _buildScalePresetButton(context, 'Smaller', 0.85, appState),
-              _buildScalePresetButton(context, 'Default', 1.0, appState),
-              _buildScalePresetButton(context, 'Large', 1.25, appState),
-              _buildScalePresetButton(context, 'XL', 1.5, appState),
-            ],
+          Center(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                _buildScalePresetButton(context, 'Smaller', 0.85, appState),
+                _buildScalePresetButton(context, 'Default', 1.0, appState),
+                _buildScalePresetButton(context, 'Large', 1.25, appState),
+                _buildScalePresetButton(context, 'XL', 1.5, appState),
+              ],
+            ),
           ),
         ],
       ),
@@ -2149,12 +2246,16 @@ class _CollapsibleSection extends StatefulWidget {
   final String title;
   final IconData icon;
   final List<Widget> children;
+  final bool initiallyExpanded;
+  final bool isSubsection;
 
   const _CollapsibleSection({
     super.key,
     required this.title,
     required this.icon,
     required this.children,
+    this.initiallyExpanded = false,
+    this.isSubsection = false,
   });
 
   @override
@@ -2162,7 +2263,7 @@ class _CollapsibleSection extends StatefulWidget {
 }
 
 class _CollapsibleSectionState extends State<_CollapsibleSection> {
-  bool _isExpanded = false;
+  late bool _isExpanded;
   bool get isExpanded => _isExpanded;
 
   void setExpanded(bool expanded) {
@@ -2173,16 +2274,74 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _isExpanded = widget.initiallyExpanded;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    if (widget.isSubsection) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              hoverColor: theme.colorScheme.primary.withValues(alpha: 0.05),
+              onTap: () {
+                setState(() {
+                  _isExpanded = !_isExpanded;
+                });
+              },
+              child: ListTile(
+                leading: Icon(widget.icon, color: theme.colorScheme.primary),
+                title: Text(
+                  widget.title,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w500,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                trailing: AnimatedRotation(
+                  turns: _isExpanded ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(
+                    Icons.expand_more,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          AnimatedCrossFade(
+            crossFadeState: _isExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 200),
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding:
+                  const EdgeInsets.only(left: 16.0, right: 8.0, bottom: 8.0),
+              child: Column(children: widget.children),
+            ),
+          ),
+        ],
+      );
+    }
 
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(widget.isSubsection ? 8 : 12),
         border: Border.all(
-          color: theme.colorScheme.outline.withValues(alpha: 0.2),
-          width: 1,
+          color: widget.isSubsection
+              ? theme.colorScheme.outline.withValues(alpha: 0.15)
+              : theme.colorScheme.outline.withValues(alpha: 0.2),
+          width: widget.isSubsection ? 1 : 1,
         ),
       ),
       child: Column(
@@ -2201,18 +2360,27 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
                 });
               },
               child: Padding(
-                padding: const EdgeInsets.all(16.0),
+                padding: EdgeInsets.all(widget.isSubsection ? 12.0 : 16.0),
                 child: Row(
                   children: [
-                    Icon(widget.icon,
-                        color: theme.colorScheme.primary, size: 20),
-                    const SizedBox(width: 8),
+                    Icon(
+                      widget.icon,
+                      color: widget.isSubsection
+                          ? theme.colorScheme.onSurfaceVariant
+                          : theme.colorScheme.primary,
+                      size: widget.isSubsection ? 18 : 20,
+                    ),
+                    SizedBox(width: widget.isSubsection ? 6 : 8),
                     Expanded(
                       child: Text(
                         widget.title,
                         style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.onSurface,
+                          fontWeight: widget.isSubsection
+                              ? FontWeight.w500
+                              : FontWeight.w600,
+                          color: widget.isSubsection
+                              ? theme.colorScheme.onSurfaceVariant
+                              : theme.colorScheme.onSurface,
                         ),
                       ),
                     ),
@@ -2221,7 +2389,9 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
                       duration: const Duration(milliseconds: 200),
                       child: Icon(
                         Icons.expand_more,
-                        color: theme.colorScheme.onSurface,
+                        color: widget.isSubsection
+                            ? theme.colorScheme.onSurfaceVariant
+                            : theme.colorScheme.onSurface,
                       ),
                     ),
                   ],
@@ -2235,7 +2405,13 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
                 : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 200),
             firstChild: const SizedBox.shrink(),
-            secondChild: Column(children: widget.children),
+            secondChild: Padding(
+              padding: EdgeInsets.only(
+                  left: widget.isSubsection ? 8.0 : 0.0,
+                  right: widget.isSubsection ? 8.0 : 0.0,
+                  bottom: widget.isSubsection ? 8.0 : 0.0),
+              child: Column(children: widget.children),
+            ),
           ),
         ],
       ),

@@ -1,5 +1,6 @@
 // AppState, the main state of the application
 import 'dart:collection';
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,15 +13,26 @@ import 'package:orbit/ui/preset.dart';
 import 'package:logger/logger.dart';
 import 'package:orbit/logging.dart';
 import 'package:orbit/sxi_indication_types.dart';
+import 'package:orbit/data/favorite.dart';
+import 'package:orbit/data/favorites_on_air_entry.dart';
+import 'package:orbit/data/favorite_on_air_event.dart';
 import 'package:orbit/debug_tools_stub.dart'
     if (dart.library.io) 'package:orbit/debug_tools.dart';
 
 class AppState extends ChangeNotifier {
+  static const int favoritesPerMonitorCapacity = 60;
+  // Maximum per type (spread across multiple monitors)
+  static const int favoritesMaxPerTypeTotal = 120;
+  final List<Favorite> favorites = <Favorite>[];
+  final List<FavoriteOnAirEntry> _favoritesOnAirEntries =
+      <FavoriteOnAirEntry>[];
+  final Map<String, Timer> _favoritesOnAirTimers = <String, Timer>{};
   final List<Preset> presets = List.generate(18, (_) => Preset());
   final List<double> eqSliderValues = List.generate(12, (_) => 0.0);
   bool enableAudio = false;
   bool tuneStart = false;
   bool sliderSnapping = true;
+  bool showOnAirFavoritesPrompt = true;
   bool debugMode = false;
   // Android-only: preferred audio output route
   String androidAudioOutputRoute = 'Speaker';
@@ -43,6 +55,8 @@ class AppState extends ChangeNotifier {
       PropertyValueNotifier(PlaybackInfo.empty());
   final ValueNotifier<AppPlaybackState> playbackStateNotifier =
       ValueNotifier(AppPlaybackState.stopped);
+  final ValueNotifier<FavoriteOnAirEvent?> favoriteOnAirNotifier =
+      ValueNotifier<FavoriteOnAirEvent?>(null);
 
   PlaybackInfo get nowPlaying => playbackInfoNotifier.value;
 
@@ -130,6 +144,9 @@ class AppState extends ChangeNotifier {
   Map<int, PlaybackInfo> channelPlaybackMetadata = {};
   final Map<int, Map<int, List<int>>> imageMap = {};
 
+  List<FavoriteOnAirEntry> get favoritesOnAirEntries =>
+      List<FavoriteOnAirEntry>.unmodifiable(_favoritesOnAirEntries);
+
   String get currentCategoryString => _categories[_currentCategory] != null
       ? String.fromCharCodes(_categories[_currentCategory]!)
       : 'None';
@@ -199,6 +216,15 @@ class AppState extends ChangeNotifier {
       presets[i] = loadedPresets[i];
     }
 
+    // Stored favorites
+    final List<Favorite> loadedFavorites = await storageData.load(
+      SaveDataType.favorites,
+      defaultValue: <Favorite>[],
+    );
+    favorites
+      ..clear()
+      ..addAll(loadedFavorites);
+
     // Preferences and flags
     enableAudio = await storageData.load(
       SaveDataType.enableAudio,
@@ -210,6 +236,10 @@ class AppState extends ChangeNotifier {
     );
     sliderSnapping = await storageData.load(
       SaveDataType.sliderSnapping,
+      defaultValue: true,
+    );
+    showOnAirFavoritesPrompt = await storageData.load(
+      SaveDataType.showOnAirFavoritesPrompt,
       defaultValue: true,
     );
     debugMode = await storageData.load(
@@ -297,6 +327,77 @@ class AppState extends ChangeNotifier {
     storageData.saveImage(channelGraphicsData);
   }
 
+  void matchedSongSeekStarted(int songId, int sid, int channel) {
+    try {
+      Favorite matchedFavorite = favorites.firstWhere((f) => f.id == songId);
+      logger.d(
+          'Song Seek Match Started on channel: $channel, song: ${matchedFavorite.artistName} ($songId)');
+      _addFavoriteOnAirEntry(
+        sid: sid,
+        channelNumber: channel,
+        matchedId: songId,
+        type: FavoriteType.song,
+      );
+      favoriteOnAirNotifier.value = FavoriteOnAirEvent(
+        type: FavoriteType.song,
+        matchedId: songId,
+        sid: sid,
+        channelNumber: channel,
+        artistName: matchedFavorite.artistName,
+        songName: matchedFavorite.songName,
+      );
+    } catch (e) {
+      logger.d('No matched favorite found for song id: $songId');
+    }
+  }
+
+  void matchedArtistSeekStarted(int artistId, int sid, int channel) {
+    try {
+      Favorite matchedFavorite = favorites.firstWhere((f) => f.id == artistId);
+      logger.d(
+          'Artist Seek Match Started on channel: $channel, artist: ${matchedFavorite.artistName} ($artistId)');
+      _addFavoriteOnAirEntry(
+        sid: sid,
+        channelNumber: channel,
+        matchedId: artistId,
+        type: FavoriteType.artist,
+      );
+      favoriteOnAirNotifier.value = FavoriteOnAirEvent(
+        type: FavoriteType.artist,
+        matchedId: artistId,
+        sid: sid,
+        channelNumber: channel,
+        artistName: matchedFavorite.artistName,
+      );
+    } catch (e) {
+      logger.d('No matched favorite found for artist id: $artistId');
+    }
+  }
+
+  void matchedSongSeekEnded(int songId, int sid, int channel) {
+    try {
+      Favorite matchedFavorite = favorites.firstWhere((f) => f.id == songId);
+      logger.d(
+          'Song Seek Match Ended on channel: $channel, song: ${matchedFavorite.artistName} ($songId)');
+      _removeFavoriteOnAirEntry(
+          sid: sid, matchedId: songId, type: FavoriteType.song);
+    } catch (e) {
+      logger.d('No matched favorite found for song id: $songId');
+    }
+  }
+
+  void matchedArtistSeekEnded(int artistId, int sid, int channel) {
+    try {
+      Favorite matchedFavorite = favorites.firstWhere((f) => f.id == artistId);
+      logger.d(
+          'Artist Seek Match Ended on channel: $channel, artist: ${matchedFavorite.artistName} ($artistId)');
+      _removeFavoriteOnAirEntry(
+          sid: sid, matchedId: artistId, type: FavoriteType.artist);
+    } catch (e) {
+      logger.d('No matched favorite found for artist id: $artistId');
+    }
+  }
+
   void updateServiceGraphicsReferenceData(
       List<ServiceGraphicsReference> serviceGraphicsReferences) {
     storageData.saveGraphicsList(serviceGraphicsReferences);
@@ -323,6 +424,12 @@ class AppState extends ChangeNotifier {
   void updateSliderSnapping(bool enabled) {
     sliderSnapping = enabled;
     storageData.save(SaveDataType.sliderSnapping, sliderSnapping);
+    notifyListeners();
+  }
+
+  void updateShowOnAirFavoritesPrompt(bool enabled) {
+    showOnAirFavoritesPrompt = enabled;
+    storageData.save(SaveDataType.showOnAirFavoritesPrompt, enabled);
     notifyListeners();
   }
 
@@ -539,11 +646,13 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void updateTrackIdsForSid(int sid, {int? songId, int? artistId}) {
+  void updateNowAiringTrackIdsForSid(int sid, {int? songId, int? artistId}) {
+    logger.t(
+        'Updating now airing track ids for sid: $sid, songId: $songId, artistId: $artistId');
     final channelData = sidMap[sid];
     if (channelData != null) {
-      if (songId != null) channelData.currentSongId = songId;
-      if (artistId != null) channelData.currentArtistId = artistId;
+      channelData.airingSongId = songId ?? 0;
+      channelData.airingArtistId = artistId ?? 0;
       notifyListeners();
     }
   }
@@ -559,6 +668,84 @@ class AppState extends ChangeNotifier {
         ..artist = artist
         ..song = song;
     }
+  }
+
+  // Favorites helpers
+  int countFavoritesByType(FavoriteType type) {
+    return favorites.where((f) => f.type == type).length;
+  }
+
+  bool isAtCapacityForType(FavoriteType type) {
+    return countFavoritesByType(type) >= favoritesMaxPerTypeTotal;
+  }
+
+  bool isNowPlayingSongFavorited() {
+    final int songId = nowPlaying.songId;
+    final int artistId = nowPlaying.artistId;
+    if (songId == 0 || songId == 0xFFFFFFFF || songId == 0xFFFF) return false;
+    if (artistId == 0 || artistId == 0xFFFFFFFF || artistId == 0xFFFF) {
+      return false;
+    }
+    return favorites.any((f) => f.isSong && f.id == songId);
+  }
+
+  bool isNowPlayingArtistFavorited() {
+    final int artistId = nowPlaying.artistId;
+    if (artistId == 0 || artistId == 0xFFFFFFFF || artistId == 0xFFFF) {
+      return false;
+    }
+    return favorites.any((f) => f.isArtist && f.id == artistId);
+  }
+
+  void addFavorite(Favorite favorite) {
+    if (favorites.any((f) => f.type == favorite.type && f.id == favorite.id)) {
+      return;
+    }
+    // Enforce per-monitor capacity
+    if (isAtCapacityForType(favorite.type)) {
+      return;
+    }
+    favorites.add(favorite);
+    storageData.save(SaveDataType.favorites, favorites);
+    // If this favorite is currently airing on any channel, add an entry now
+    _syncOnAirAfterAddition(favorite);
+    notifyListeners();
+  }
+
+  void removeFavorite(Favorite favorite) {
+    favorites
+        .removeWhere((f) => f.type == favorite.type && f.id == favorite.id);
+    storageData.save(SaveDataType.favorites, favorites);
+    // If this favorite was currently airing, remove its on-air entries
+    _syncOnAirAfterRemoval(favorite);
+    notifyListeners();
+  }
+
+  void replaceFavorites(List<Favorite> newFavorites) {
+    // Compute diffs before replacing so we can keep the on-air list in sync
+    final List<Favorite> previous = List<Favorite>.from(favorites);
+    final List<Favorite> added = newFavorites
+        .where(
+            (nf) => !previous.any((pf) => pf.type == nf.type && pf.id == nf.id))
+        .toList();
+    final List<Favorite> removed = previous
+        .where((pf) =>
+            !newFavorites.any((nf) => nf.type == pf.type && nf.id == pf.id))
+        .toList();
+
+    favorites
+      ..clear()
+      ..addAll(newFavorites);
+    storageData.save(SaveDataType.favorites, favorites);
+
+    // Apply on-air updates for removed, then added
+    for (final f in removed) {
+      _syncOnAirAfterRemoval(f);
+    }
+    for (final f in added) {
+      _syncOnAirAfterAddition(f);
+    }
+    notifyListeners();
   }
 
   void updatePlaybackState(
@@ -605,6 +792,15 @@ class AppState extends ChangeNotifier {
     nowPlaying.artistTitle = String.fromCharCodes(newArtist);
   }
 
+  void updateNowPlayingIds(int? songId, int? artistId) {
+    if (songId != null) {
+      nowPlaying.songId = songId;
+    }
+    if (artistId != null) {
+      nowPlaying.artistId = artistId;
+    }
+  }
+
   void updateNowPlayingChannel(int channel, int sid) {
     logger.t('Updating now playing channel: $channel, sid: $sid');
     if (_currentChannel != channel) {
@@ -622,22 +818,26 @@ class AppState extends ChangeNotifier {
   }
 
   void updateNowPlayingWithNewData(
-      List<int> newStation,
-      List<int> newSong,
-      List<int> newArtist,
-      int catId,
-      int channel,
-      int sid,
-      Uint8List programId,
-      List<int> img) {
-    logger.i(
-        'Updating now playing with new data, SID: $sid, Channel: $channel, Program: $programId');
+    List<int> newStation,
+    List<int> newSong,
+    List<int> newArtist,
+    int? newSongId,
+    int? newArtistId,
+    int catId,
+    int channel,
+    int sid,
+    Uint8List programId,
+    List<int> img,
+  ) {
+    logger.d(
+        'Updating now playing with new data, SID: $sid, Channel: $channel, Program: $programId, SongId: $newSongId, ArtistId: $newArtistId');
 
     if (newStation.isNotEmpty) {
       updateNowPlayingChannelName(newStation);
     }
     updateNowPlayingSong(newSong);
     updateNowPlayingArtist(newArtist);
+    updateNowPlayingIds(newSongId, newArtistId);
     if (catId != -1) {
       updateNowPlayingCategory(catId);
     }
@@ -668,6 +868,14 @@ class AppState extends ChangeNotifier {
 
   void clearChannelPlaybackMetadata() {
     channelPlaybackMetadata.clear();
+  }
+
+  ChannelData? getChannelDataForNowPlaying() {
+    return sidMap[nowPlaying.sid];
+  }
+
+  ChannelData? getChannelDataForSid(int sid) {
+    return sidMap[sid];
   }
 
   int? getSidFromChannelId(int channelId) {
@@ -715,6 +923,100 @@ class AppState extends ChangeNotifier {
       }
     }
   }
+
+  // Favorites On Air helpers
+  String _favoriteEntryKey(int sid, int matchedId, FavoriteType type) {
+    return '$sid|$matchedId|${type.name}';
+  }
+
+  void _addFavoriteOnAirEntry({
+    required int sid,
+    required int channelNumber,
+    required int matchedId,
+    required FavoriteType type,
+    Duration ttl = const Duration(minutes: 5),
+  }) {
+    final String key = _favoriteEntryKey(sid, matchedId, type);
+
+    // Update existing or add new
+    final int existingIndex = _favoritesOnAirEntries.indexWhere(
+        (e) => e.sid == sid && e.matchedId == matchedId && e.type == type);
+    final FavoriteOnAirEntry entry = FavoriteOnAirEntry(
+      sid: sid,
+      channelNumber: channelNumber,
+      matchedId: matchedId,
+      type: type,
+      startedAt: DateTime.now(),
+    );
+    if (existingIndex >= 0) {
+      _favoritesOnAirEntries[existingIndex] = entry;
+    } else {
+      _favoritesOnAirEntries.add(entry);
+    }
+
+    // Reset TTL timer
+    _favoritesOnAirTimers[key]?.cancel();
+    _favoritesOnAirTimers[key] = Timer(ttl, () {
+      _removeFavoriteOnAirEntry(sid: sid, matchedId: matchedId, type: type);
+    });
+
+    notifyListeners();
+  }
+
+  void _removeFavoriteOnAirEntry({
+    required int sid,
+    required int matchedId,
+    required FavoriteType type,
+  }) {
+    final String key = _favoriteEntryKey(sid, matchedId, type);
+    _favoritesOnAirTimers.remove(key)?.cancel();
+    _favoritesOnAirEntries.removeWhere(
+        (e) => e.sid == sid && e.matchedId == matchedId && e.type == type);
+    notifyListeners();
+  }
+
+  // Keep Favorites On Air entries in sync when favorites are added/removed
+  void _syncOnAirAfterAddition(Favorite favorite) {
+    // Scan known channels and add entries where this favorite is currently airing
+    for (final channel in sidMap.values) {
+      if (favorite.isSong) {
+        if (channel.airingSongId == favorite.id && channel.airingSongId != 0) {
+          _addFavoriteOnAirEntry(
+            sid: channel.sid,
+            channelNumber: channel.channelNumber,
+            matchedId: favorite.id,
+            type: FavoriteType.song,
+            ttl: const Duration(minutes: 1),
+          );
+        }
+      } else if (favorite.isArtist) {
+        if (channel.airingArtistId == favorite.id &&
+            channel.airingArtistId != 0) {
+          _addFavoriteOnAirEntry(
+            sid: channel.sid,
+            channelNumber: channel.channelNumber,
+            matchedId: favorite.id,
+            type: FavoriteType.artist,
+            ttl: const Duration(minutes: 1),
+          );
+        }
+      }
+    }
+  }
+
+  void _syncOnAirAfterRemoval(Favorite favorite) {
+    // Remove any existing on-air entries for this favorite across all SIDs
+    final List<FavoriteOnAirEntry> toRemove = _favoritesOnAirEntries
+        .where((e) => e.type == favorite.type && e.matchedId == favorite.id)
+        .toList();
+    for (final e in toRemove) {
+      _removeFavoriteOnAirEntry(
+        sid: e.sid,
+        matchedId: e.matchedId,
+        type: e.type,
+      );
+    }
+  }
 }
 
 class PlaybackInfo {
@@ -722,6 +1024,8 @@ class PlaybackInfo {
   String channelCategory;
   String songTitle;
   String artistTitle;
+  int songId;
+  int artistId;
   Uint8List channelImage;
   int duration;
   int channelNumber;
@@ -735,6 +1039,8 @@ class PlaybackInfo {
     this.channelCategory,
     this.songTitle,
     this.artistTitle,
+    this.songId,
+    this.artistId,
     this.channelImage,
     this.channelNumber,
     this.duration,
@@ -749,6 +1055,8 @@ class PlaybackInfo {
         channelCategory = '',
         songTitle = '',
         artistTitle = '',
+        songId = 0,
+        artistId = 0,
         channelImage = Uint8List(0),
         channelNumber = 0,
         duration = 0,

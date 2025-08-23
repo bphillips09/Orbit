@@ -125,6 +125,20 @@ enum ChanSelectionType {
   }
 }
 
+enum PlayPoint {
+  live(0),
+  restart(1),
+  auto(2);
+
+  const PlayPoint(this.value);
+  final int value;
+
+  static PlayPoint getByValue(int i) {
+    return PlayPoint.values.firstWhere((x) => x.value == i,
+        orElse: () => throw ArgumentError('Invalid value: $i'));
+  }
+}
+
 enum AudioRoutingType {
   noRouting(0),
   routeToAudio(1),
@@ -246,6 +260,40 @@ enum PackageOptionType {
 
   static PackageOptionType getByValue(int i) {
     return PackageOptionType.values.firstWhere((x) => x.value == i,
+        orElse: () => throw ArgumentError('Invalid value: $i'));
+  }
+}
+
+enum SeekControlType {
+  disable(0),
+  enableSeekEnd(1),
+  enableSeekImmediate(2),
+  enableSeekEndAndImmediate(3);
+
+  const SeekControlType(this.value);
+  final int value;
+
+  static SeekControlType getByValue(int i) {
+    return SeekControlType.values.firstWhere((x) => x.value == i,
+        orElse: () => throw ArgumentError('Invalid value: $i'));
+  }
+}
+
+enum SeekMonitorType {
+  songMonitor1(0),
+  songMonitor2(1),
+  artistMonitor1(2),
+  artistMonitor2(3),
+  seekMonitor4(4),
+  seekMonitor5(5),
+  seekMonitor6(6),
+  seekMonitor7(7);
+
+  const SeekMonitorType(this.value);
+  final int value;
+
+  static SeekMonitorType getByValue(int i) {
+    return SeekMonitorType.values.firstWhere((x) => x.value == i,
         orElse: () => throw ArgumentError('Invalid value: $i'));
   }
 }

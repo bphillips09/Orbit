@@ -520,11 +520,21 @@ class DeviceLayer {
     int defaultSid = systemConfiguration?.defaultSid ?? 0;
     List<int> eq = systemConfiguration?.eq ?? List<int>.filled(10, 0);
     List<int> presets = List<int>.filled(20, 1);
+    List<int> favoriteSongIDs =
+        systemConfiguration?.favoriteSongIDs ?? List<int>.empty();
+    List<int> favoriteArtistIDs =
+        systemConfiguration?.favoriteArtistIDs ?? List<int>.empty();
     if (systemConfiguration != null) {
       for (int i = 0; i < systemConfiguration!.presets.length; i++) {
         presets[i] = systemConfiguration!.presets[i];
       }
     }
+
+    final List<int> songFavFirst = favoriteSongIDs.take(60).toList();
+    final List<int> songFavSecond = favoriteSongIDs.skip(60).take(60).toList();
+    final List<int> artistFavFirst = favoriteArtistIDs.take(60).toList();
+    final List<int> artistFavSecond =
+        favoriteArtistIDs.skip(60).take(60).toList();
 
     List<SXiPayload> initPayloads = [
       // Standard module config
@@ -548,12 +558,12 @@ class DeviceLayer {
       // Unmute audio
       SXiAudioMuteCommand(AudioMuteType.unmute),
       // Setup metadata monitors (stop all active monitors)
-      SXiExtendedMetadataMonitorCommand(
+      SXiMonitorExtendedMetadataCommand(
           MetadataMonitorType.extendedGlobalMetadata,
           MonitorChangeType.dontMonitorAll,
           List.empty()),
       // Setup channel metadata monitor
-      SXiExtendedMetadataMonitorCommand.channelMetadata(
+      SXiMonitorExtendedMetadataCommand.channelMetadata(
         MetadataMonitorType.extendedChannelMetadataForAllChannels,
         MonitorChangeType.monitor,
         [
@@ -564,12 +574,59 @@ class DeviceLayer {
         ],
       ),
       // Setup track metadata monitor
-      SXiExtendedMetadataMonitorCommand.trackMetadata(
+      SXiMonitorExtendedMetadataCommand.trackMetadata(
           MetadataMonitorType.extendedTrackMetadataForAllChannels,
           MonitorChangeType.monitor, [
         TrackMetadataIdentifier.songId,
+        TrackMetadataIdentifier.songName,
         TrackMetadataIdentifier.artistId,
+        TrackMetadataIdentifier.artistName,
+        TrackMetadataIdentifier.currentInfo,
+        // TrackMetadataIdentifier.sportBroadcastId,
+        // TrackMetadataIdentifier.gameTeamId,
+        // TrackMetadataIdentifier.leagueBroadcastId,
+        // TrackMetadataIdentifier.trafficCityId,
+        TrackMetadataIdentifier.itunesSongId
       ]),
+      // Setup favorites monitors (stop all active monitors)
+      SXiMonitorSeekCommand.disableAll(
+          seekMonitorID: SeekMonitorType.songMonitor1),
+      SXiMonitorSeekCommand.disableAll(
+          seekMonitorID: SeekMonitorType.songMonitor2),
+      SXiMonitorSeekCommand.disableAll(
+          seekMonitorID: SeekMonitorType.artistMonitor1),
+      SXiMonitorSeekCommand.disableAll(
+          seekMonitorID: SeekMonitorType.artistMonitor2),
+      // Setup favorites monitors (start monitoring song favorites)
+      if (songFavFirst.isNotEmpty)
+        SXiMonitorSeekCommand.songMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          songIDs: songFavFirst,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+          monitorSlot: SeekMonitorType.songMonitor1,
+        ),
+      if (songFavSecond.isNotEmpty)
+        SXiMonitorSeekCommand.songMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          songIDs: songFavSecond,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+          monitorSlot: SeekMonitorType.songMonitor2,
+        ),
+      // Setup favorites monitors (start monitoring artist favorites)
+      if (artistFavFirst.isNotEmpty)
+        SXiMonitorSeekCommand.artistMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          artistIDs: artistFavFirst,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+          monitorSlot: SeekMonitorType.artistMonitor1,
+        ),
+      if (artistFavSecond.isNotEmpty)
+        SXiMonitorSeekCommand.artistMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          artistIDs: artistFavSecond,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+          monitorSlot: SeekMonitorType.artistMonitor2,
+        ),
       // Setup feature monitors (stop all active monitors)
       SXiMonitorFeatureCommand(MonitorChangeType.dontMonitorAll, List.empty()),
       // Setup feature monitors (start monitoring all)
@@ -640,6 +697,190 @@ class DeviceLayer {
       return false;
     }
   }
+
+  void addFavorites(List<int> songIDs, List<int> artistIDs) {
+    logger.d('Adding favorites: SongIDs: $songIDs, ArtistIDs: $artistIDs');
+    // Split across up to two monitors per type (60 IDs per monitor)
+    List<SXiPayload> commands = [];
+    if (songIDs.isNotEmpty) {
+      final List<int> first = songIDs.take(60).toList();
+      final List<int> second = songIDs.skip(60).take(60).toList();
+      if (first.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand.songMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          songIDs: first,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+        ));
+      }
+      if (second.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand.songMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          songIDs: second,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+          monitorSlot: SeekMonitorType.songMonitor2,
+        ));
+      }
+    }
+    if (artistIDs.isNotEmpty) {
+      final List<int> first = artistIDs.take(60).toList();
+      final List<int> second = artistIDs.skip(60).take(60).toList();
+      if (first.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand.artistMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          artistIDs: first,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+        ));
+      }
+      if (second.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand(
+          SeekMonitorType.artistMonitor2,
+          MonitorChangeType.monitor,
+          TrackMetadataIdentifier.artistId,
+          second.length,
+          4,
+          second,
+          1,
+          [TrackMetadataIdentifier.songName.value],
+          SeekControlType.enableSeekEndAndImmediate,
+        ));
+      }
+    }
+    if (commands.isEmpty) {
+      return;
+    }
+    for (int i = 0; i < commands.length; i++) {
+      Future.delayed(Duration(milliseconds: 500 * i), () {
+        sendControlCommand(commands[i]);
+      });
+    }
+  }
+
+  void removeFavorites(List<int> songIDs, List<int> artistIDs) {
+    logger.d('Removing favorites: SongIDs: $songIDs, ArtistIDs: $artistIDs');
+    // Split removals across up to two monitors per type
+    List<SXiPayload> commands = [];
+    if (songIDs.isNotEmpty) {
+      final List<int> first = songIDs.take(60).toList();
+      final List<int> second = songIDs.skip(60).take(60).toList();
+      if (first.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand.songMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          songIDs: first,
+          seekControl: SeekControlType.disable,
+        ));
+      }
+      if (second.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand.songMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          songIDs: second,
+          seekControl: SeekControlType.disable,
+          monitorSlot: SeekMonitorType.songMonitor2,
+        ));
+      }
+    }
+    if (artistIDs.isNotEmpty) {
+      final List<int> first = artistIDs.take(60).toList();
+      final List<int> second = artistIDs.skip(60).take(60).toList();
+      if (first.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand.artistMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          artistIDs: first,
+          seekControl: SeekControlType.disable,
+        ));
+      }
+      if (second.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand(
+          SeekMonitorType.artistMonitor2,
+          MonitorChangeType.monitor,
+          TrackMetadataIdentifier.artistId,
+          second.length,
+          4,
+          second,
+          1,
+          [TrackMetadataIdentifier.songName.value],
+          SeekControlType.disable,
+        ));
+      }
+    }
+    if (commands.isEmpty) {
+      return;
+    }
+    for (int i = 0; i < commands.length; i++) {
+      Future.delayed(Duration(milliseconds: 500 * i), () {
+        sendControlCommand(commands[i]);
+      });
+    }
+  }
+
+  void sendFavorites(List<int> songIDs, List<int> artistIDs) {
+    logger.d('Sending favorites: SongIDs: $songIDs, ArtistIDs: $artistIDs');
+    List<SXiPayload> commands = [
+      SXiMonitorSeekCommand.disableAll(
+          seekMonitorID: SeekMonitorType.songMonitor1),
+      SXiMonitorSeekCommand.disableAll(
+          seekMonitorID: SeekMonitorType.songMonitor2),
+      SXiMonitorSeekCommand.disableAll(
+          seekMonitorID: SeekMonitorType.artistMonitor1),
+      SXiMonitorSeekCommand.disableAll(
+          seekMonitorID: SeekMonitorType.artistMonitor2),
+    ];
+
+    // Songs split across up to two batches
+    if (songIDs.isNotEmpty) {
+      final List<int> first = songIDs.take(60).toList();
+      final List<int> second = songIDs.skip(60).take(60).toList();
+      if (first.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand.songMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          songIDs: first,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+        ));
+      }
+      if (second.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand.songMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          songIDs: second,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+          monitorSlot: SeekMonitorType.songMonitor2,
+        ));
+      }
+    }
+
+    // Artists split across up to two batches
+    if (artistIDs.isNotEmpty) {
+      final List<int> first = artistIDs.take(60).toList();
+      final List<int> second = artistIDs.skip(60).take(60).toList();
+      if (first.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand.artistMonitor(
+          monitorChangeType: MonitorChangeType.monitor,
+          artistIDs: first,
+          seekControl: SeekControlType.enableSeekEndAndImmediate,
+        ));
+      }
+      if (second.isNotEmpty) {
+        commands.add(SXiMonitorSeekCommand(
+          SeekMonitorType.artistMonitor2,
+          MonitorChangeType.monitor,
+          TrackMetadataIdentifier.artistId,
+          second.length,
+          4,
+          second,
+          1,
+          [TrackMetadataIdentifier.songName.value],
+          SeekControlType.enableSeekEndAndImmediate,
+        ));
+      }
+    }
+
+    if (commands.isEmpty) {
+      return;
+    }
+    for (int i = 0; i < commands.length; i++) {
+      Future.delayed(Duration(milliseconds: 500 * i), () {
+        sendControlCommand(commands[i]);
+      });
+    }
+  }
 }
 
 // Local system configuration
@@ -648,10 +889,14 @@ class SystemConfiguration {
   int defaultSid = 0;
   List<int> eq;
   List<int> presets;
+  List<int> favoriteSongIDs;
+  List<int> favoriteArtistIDs;
 
   SystemConfiguration(
       {this.volume = 0,
       this.defaultSid = 0,
       this.eq = const [],
-      this.presets = const []});
+      this.presets = const [],
+      this.favoriteSongIDs = const [],
+      this.favoriteArtistIDs = const []});
 }

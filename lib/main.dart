@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
+import 'package:orbit/data/favorite.dart';
 import 'package:provider/provider.dart';
 import 'package:scaled_app/scaled_app.dart';
 import 'package:orbit/logging.dart';
@@ -33,6 +34,8 @@ import 'package:window_manager/window_manager.dart';
 import 'package:orbit/update_checker.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:orbit/ui/unsupported_browser_app.dart';
+import 'package:orbit/ui/favorite_dialog.dart';
+import 'package:orbit/ui/favorites_on_air_dialog.dart';
 
 // Audio service handler
 AudioServiceHandler? audioServiceHandler;
@@ -161,6 +164,7 @@ class MainPageState extends State<MainPage> {
   TrackSnapInfo? currentSnapInfo;
   GlobalKey sliderKey = GlobalKey();
   bool _isLoading = true;
+  bool _autoRetryAttempted = false;
   bool initiatedPlayback = false;
   bool _audioServiceInitialized = false;
   String _connectionDetails = '';
@@ -179,6 +183,7 @@ class MainPageState extends State<MainPage> {
   bool _sliderDragCanceled = false;
   // Track the displayed warning types to prevent duplicates
   final Set<String> _currentlyDisplayedWarnings = <String>{};
+  DateTime? _lastOnAirPromptAt;
 
   @override
   void initState() {
@@ -215,6 +220,7 @@ class MainPageState extends State<MainPage> {
       // Listen for playback changes
       appState.playbackInfoNotifier.addListener(onPlaybackInfoChanged);
       appState.playbackStateNotifier.addListener(onPlaybackStateChanged);
+      appState.favoriteOnAirNotifier.addListener(_onFavoriteOnAir);
 
       try {
         await startupSequence();
@@ -267,6 +273,14 @@ class MainPageState extends State<MainPage> {
       defaultSid: appState.lastSid,
       eq: calcEq(),
       presets: appState.presets.map((preset) => preset.sid).toList(),
+      favoriteSongIDs: appState.favorites
+          .where((f) => f.type == FavoriteType.song)
+          .map((f) => f.id)
+          .toList(),
+      favoriteArtistIDs: appState.favorites
+          .where((f) => f.type == FavoriteType.artist)
+          .map((f) => f.id)
+          .toList(),
     );
 
     String lastPortString = await appState.storageData.load(
@@ -372,7 +386,13 @@ class MainPageState extends State<MainPage> {
         } catch (_) {}
       }
 
-      return await deviceLayer.startupSequence();
+      final success = await deviceLayer.startupSequence();
+      if (success) {
+        setState(() {
+          _autoRetryAttempted = false;
+        });
+      }
+      return success;
     } catch (e) {
       onDeviceConnectionError(e.toString(), true);
       return false;
@@ -393,6 +413,18 @@ class MainPageState extends State<MainPage> {
       logger.e('Error: $details');
     }
     if (fatal) {
+      // Automatic retry before showing the fatal dialog
+      if (!_autoRetryAttempted) {
+        setState(() {
+          _autoRetryAttempted = true;
+        });
+        try {
+          clearAllMessages();
+        } catch (_) {}
+        // Schedule retry on the next microtask to avoid setState during callback/build
+        Future.microtask(() => startupSequence());
+        return;
+      }
       setState(() {
         _isLoading = false;
       });
@@ -673,8 +705,30 @@ class MainPageState extends State<MainPage> {
     audioController.dispose();
     appState.playbackInfoNotifier.removeListener(onPlaybackInfoChanged);
     appState.playbackStateNotifier.removeListener(onPlaybackStateChanged);
+    appState.favoriteOnAirNotifier.removeListener(_onFavoriteOnAir);
     channelTextFocusNode.dispose();
     super.dispose();
+  }
+
+  void _onFavoriteOnAir() {
+    final evt = appState.favoriteOnAirNotifier.value;
+    if (!mounted) return;
+    if (evt != null) {
+      _lastOnAirPromptAt = DateTime.now();
+      setState(() {});
+      // Schedule hide after 15 seconds unless a newer event arrives
+      Future.delayed(const Duration(seconds: 15), () {
+        if (!mounted) return;
+        if (_lastOnAirPromptAt != null &&
+            DateTime.now().difference(_lastOnAirPromptAt!) >=
+                const Duration(seconds: 15)) {
+          setState(() {
+            // Clear to force title hide
+            _lastOnAirPromptAt = null;
+          });
+        }
+      });
+    }
   }
 
   // Update the playback info
@@ -911,9 +965,14 @@ class MainPageState extends State<MainPage> {
               builder: (BuildContext context, StateSetter setStateDialog) {
                 return AlertDialog(
                   title: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Select Serial Device...'),
+                      const Expanded(
+                        child: Text(
+                          'Select Serial Device...',
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
+                        ),
+                      ),
                       if (!kIsWeb && !kIsWasm)
                         IconButton(
                           icon: const Icon(Icons.refresh),
@@ -985,7 +1044,7 @@ class MainPageState extends State<MainPage> {
   }
 
   // Build the text that may show in the app bar
-  Widget _buildAppBarTitle(AppState appState) {
+  Widget _buildAppBarTitle(BuildContext context, AppState appState) {
     if (appState.updatingCategories || appState.updatingChannels) {
       return Text(
         'Updating ${appState.updatingChannels ? 'Channels' : 'Categories'}...',
@@ -997,6 +1056,29 @@ class MainPageState extends State<MainPage> {
     if (appState.isTuneMixActive) {
       return Text('Presets Mix');
     }
+    // If any favorites are on air, show a centered quick-access button
+    if (appState.showOnAirFavoritesPrompt &&
+        appState.favoritesOnAirEntries.isNotEmpty &&
+        _lastOnAirPromptAt != null) {
+      final hasSong = appState.favoritesOnAirEntries
+          .any((e) => e.type == FavoriteType.song);
+      final label = 'Favorite ${hasSong ? 'Song' : 'Artist'} On Air';
+      final cs = Theme.of(context).colorScheme;
+      return TextButton.icon(
+        onPressed: () {
+          FavoritesOnAirDialogHelper.show(
+            context: context,
+            appState: appState,
+            deviceLayer: deviceLayer,
+          );
+        },
+        icon: Icon(Icons.favorite, color: cs.primary),
+        label: Text(
+          label,
+          style: TextStyle(color: cs.primary),
+        ),
+      );
+    }
     return const SizedBox.shrink();
   }
 
@@ -1007,7 +1089,7 @@ class MainPageState extends State<MainPage> {
         return Scaffold(
           resizeToAvoidBottomInset: false,
           appBar: AppBar(
-            title: _buildAppBarTitle(appState),
+            title: _buildAppBarTitle(context, appState),
             centerTitle: true,
             leading: IconButton(
               icon: Icon(getSignalIcon(
@@ -1111,20 +1193,29 @@ class MainPageState extends State<MainPage> {
                                         CrossAxisAlignment.center,
                                     children: [
                                       // Album Art
-                                      AlbumArt(
-                                        size: 180,
-                                        filterQuality: FilterQuality.high,
-                                        imageBytes:
-                                            appState.nowPlaying.image.isEmpty
-                                                ? null
-                                                : appState.nowPlaying.image,
-                                        borderRadius: 8.0,
-                                        borderWidth: 2.0,
-                                        placeholder: Icon(
-                                          getCategoryIcon(
-                                            appState.currentCategoryString,
+                                      GestureDetector(
+                                        onTap: () {
+                                          FavoriteDialogHelper.show(
+                                            context: context,
+                                            appState: appState,
+                                            deviceLayer: deviceLayer,
+                                          );
+                                        },
+                                        child: AlbumArt(
+                                          size: 180,
+                                          filterQuality: FilterQuality.high,
+                                          imageBytes:
+                                              appState.nowPlaying.image.isEmpty
+                                                  ? null
+                                                  : appState.nowPlaying.image,
+                                          borderRadius: 8.0,
+                                          borderWidth: 2.0,
+                                          placeholder: Icon(
+                                            getCategoryIcon(
+                                              appState.currentCategoryString,
+                                            ),
+                                            size: 64,
                                           ),
-                                          size: 64,
                                         ),
                                       ),
                                       SizedBox(width: 36),
@@ -1149,26 +1240,44 @@ class MainPageState extends State<MainPage> {
                                               ),
                                             ),
                                             SizedBox(height: 8),
-                                            Text(
-                                              appState.nowPlaying.songTitle,
-                                              style: TextStyle(
-                                                fontSize: 28,
-                                                fontWeight: FontWeight.bold,
+                                            GestureDetector(
+                                              onTap: () {
+                                                FavoriteDialogHelper.show(
+                                                  context: context,
+                                                  appState: appState,
+                                                  deviceLayer: deviceLayer,
+                                                );
+                                              },
+                                              child: Text(
+                                                appState.nowPlaying.songTitle,
+                                                style: TextStyle(
+                                                  fontSize: 28,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
                                               ),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
                                             ),
                                             SizedBox(height: 8),
-                                            Text(
-                                              appState.nowPlaying.artistTitle,
-                                              style: TextStyle(
-                                                fontSize: 20,
-                                                color: Colors.grey,
+                                            GestureDetector(
+                                              onTap: () {
+                                                FavoriteDialogHelper.show(
+                                                  context: context,
+                                                  appState: appState,
+                                                  deviceLayer: deviceLayer,
+                                                );
+                                              },
+                                              child: Text(
+                                                appState.nowPlaying.artistTitle,
+                                                style: TextStyle(
+                                                  fontSize: 20,
+                                                  color: Colors.grey,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
                                               ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
                                             ),
                                           ],
                                         ),
@@ -1297,29 +1406,56 @@ class MainPageState extends State<MainPage> {
                         ),
                         const SizedBox(height: 10),
                         // Current track album art
-                        AlbumArt(
-                          size: 128,
-                          filterQuality: FilterQuality.high,
-                          imageBytes: appState.nowPlaying.image.isEmpty
-                              ? null
-                              : appState.nowPlaying.image,
-                          borderRadius: 8.0,
-                          borderWidth: 2.0,
-                          placeholder: Icon(
-                            getCategoryIcon(appState.currentCategoryString),
-                            size: 44,
+                        GestureDetector(
+                          onTap: () {
+                            FavoriteDialogHelper.show(
+                              context: context,
+                              appState: appState,
+                              deviceLayer: deviceLayer,
+                            );
+                          },
+                          child: AlbumArt(
+                            size: 128,
+                            filterQuality: FilterQuality.high,
+                            imageBytes: appState.nowPlaying.image.isEmpty
+                                ? null
+                                : appState.nowPlaying.image,
+                            borderRadius: 8.0,
+                            borderWidth: 2.0,
+                            placeholder: Icon(
+                              getCategoryIcon(appState.currentCategoryString),
+                              size: 44,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 10),
                         // Current track
-                        Text(
-                          appState.nowPlaying.songTitle,
-                          style: TextStyle(fontSize: 20),
+                        GestureDetector(
+                          onTap: () {
+                            FavoriteDialogHelper.show(
+                              context: context,
+                              appState: appState,
+                              deviceLayer: deviceLayer,
+                            );
+                          },
+                          child: Text(
+                            appState.nowPlaying.songTitle,
+                            style: TextStyle(fontSize: 20),
+                          ),
                         ),
                         // Current artist
-                        Text(
-                          appState.nowPlaying.artistTitle,
-                          style: TextStyle(fontSize: 18, color: Colors.grey),
+                        GestureDetector(
+                          onTap: () {
+                            FavoriteDialogHelper.show(
+                              context: context,
+                              appState: appState,
+                              deviceLayer: deviceLayer,
+                            );
+                          },
+                          child: Text(
+                            appState.nowPlaying.artistTitle,
+                            style: TextStyle(fontSize: 18, color: Colors.grey),
+                          ),
                         ),
                         const SizedBox(height: 10),
                         //  Playback controls
@@ -1614,9 +1750,7 @@ class MainPageState extends State<MainPage> {
                           _showSelectChannelFromEPG();
                         },
                   icon: const Icon(Icons.view_list),
-                  label: isLandscape
-                      ? const Text('Program Guide')
-                      : const Text('Guide'),
+                  label: const Text('Guide'),
                 ),
               ),
             ),
@@ -1700,6 +1834,25 @@ class MainPageState extends State<MainPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
+        // Favorite toggle button
+        IconButton(
+          tooltip: 'Favorite',
+          iconSize: 28,
+          icon: Icon(
+            appState.isNowPlayingSongFavorited() ||
+                    appState.isNowPlayingArtistFavorited()
+                ? Icons.favorite
+                : Icons.favorite_border,
+          ),
+          onPressed: () {
+            FavoriteDialogHelper.show(
+              context: context,
+              appState: appState,
+              deviceLayer: deviceLayer,
+            );
+          },
+        ),
+        const SizedBox(width: 8),
         // Rev button
         IconButton(
           icon: const Icon(Icons.skip_previous),

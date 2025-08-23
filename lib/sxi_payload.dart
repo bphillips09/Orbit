@@ -17,6 +17,8 @@ abstract class SXiPayload {
     0x8021: (bytes) => SXiPowerModeIndication.fromBytes(bytes),
     0x8060: (bytes) => SXiTimeIndication.fromBytes(bytes),
     0x8080: (bytes) => SXiEventIndication.fromBytes(bytes),
+    0x80f0: (bytes) => SXiIPAuthenticationIndication.fromBytes(bytes),
+    0x80f1: (bytes) => SXiAuthenticationIndication.fromBytes(bytes),
     0x80a0: (bytes) => SXiStatusIndication.fromBytes(bytes),
     0x80c0: (bytes) => SXiDisplayAdvisoryIndication.fromBytes(bytes),
     0x80c1: (bytes) => SXiSubscriptionStatusIndication.fromBytes(bytes),
@@ -28,6 +30,7 @@ abstract class SXiPayload {
     0x8301: (bytes) => SXiChannelMetadataIndication.fromBytes(bytes),
     0x8302: (bytes) => SXiGlobalMetadataIndication.fromBytes(bytes),
     0x8303: (bytes) => SXiLookAheadMetadataIndication.fromBytes(bytes),
+    0x8304: (bytes) => SXiSeekIndication.fromBytes(bytes),
     0x8402: (bytes) => SXiInstantReplayPlaybackInfoIndication.fromBytes(bytes),
     0x8403: (bytes) =>
         SXiInstantReplayPlaybackMetadataIndication.fromBytes(bytes),
