@@ -40,7 +40,6 @@ This guide shows how to wire the SXV300 to a USB UART, audio input, and power. T
 ## Hardware Overview
 <div align="left">
   <img src="https://i.imgur.com/9C9W2xL.png" alt="Hardware Overview" width="500" />
-  
 </div>
 
 Wiring tips:
@@ -51,6 +50,13 @@ Wiring tips:
 - Vehicle use: connect +12V to the battery or switched ACC with an inline fuse.
 - Non‑vehicle use: a 12V 1A DC power adapter is recommended.
 - The SXV300 cable terminates at solderable test pads inside the case, which opens with three Torx screws and gentle unsnapping at corners.
+
+## Wiring Diagram
+<div align="left">
+  <a href="https://app.cirkitdesigner.com/project/0c22d9b6-d721-4c25-b506-b9e4cf0f9c46" target="_blank" rel="noopener noreferrer">
+    <img src="https://i.imgur.com/4T3MgIE.jpeg" alt="Wiring Diagram" width="500" />
+  </a>
+</div>
 
 ## Connection Diagram (ASCII)
 ```text
