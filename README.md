@@ -1,5 +1,9 @@
 # Orbit
 
+<img src="https://i.imgur.com/ujr1TKY.png" alt="Orbit on macOS (Landscape)" height="250" /> <img src="https://i.imgur.com/8LgfafM.png" alt="Orbit on Web (Portrait)" height="250" />
+
+> _Screenshots of Orbit on macOS and Web_
+
 An offline satellite radio player that can work completely without internet.
 
 Orbit connects to an [SXV300][sxv300-link] tuner and controls it using the SXi protocol.

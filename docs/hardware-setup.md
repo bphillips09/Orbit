@@ -22,7 +22,6 @@ This guide shows how to wire the SXV300 to a USB UART, audio input, and power. T
       </td>
     </tr>
   </table>
-  
 </div>
 
 | Pin | SXV300 | Dynavin Cable | UART Adapter |
@@ -36,6 +35,13 @@ This guide shows how to wire the SXV300 to a USB UART, audio input, and power. T
 | 7 | Audio L $\color{white}{\blacksquare}$ | Audio L $\color{green}{\blacksquare}$ |  |
 | 8 | Tuner TX $\color{orange}{\blacksquare}$ | Tuner TX $\color{white}{\blacksquare}$ | --> RX |
 
+
+
+## Hardware Overview
+<div align="left">
+  <img src="https://i.imgur.com/9C9W2xL.png" alt="Hardware Overview" width="500" />
+  
+</div>
 
 Wiring tips:
 - UART TX connects to device RX; UART RX connects to device TX.
