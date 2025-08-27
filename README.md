@@ -22,7 +22,7 @@ Orbit connects to an [SXV300][sxv300-link] tuner and controls it using the SXi p
 | Restart song on tune | ✅ Supported |
 | Song / Artist alerts | ✅ Supported |
 | Sports alerts | ⏳ Planned |
-| Travel Link (downloaded from satellite) | ❌ Not yet supported |
+| Weather / Data (downloaded from satellite) | ❌ Not yet supported |
 | Internet Streaming | ❌ Not supported |
 
 ## Platforms
