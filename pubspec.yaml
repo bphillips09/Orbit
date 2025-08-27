@@ -1,7 +1,7 @@
 name: orbit
 description: 'Space Radio'
 publish_to: 'none'
-version: 0.2.0
+version: 0.3.0
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -26,7 +26,7 @@ dependencies:
   #file operations
   open_file: ^3.5.10
   android_intent_plus: ^5.3.1
-  file_picker: ^10.3.1
+  file_picker: ^10.3.2
   #serial
   serial: ^0.0.7+1
   usb_serial: ^0.5.2
@@ -34,7 +34,7 @@ dependencies:
   #audio
   mp_audio_stream: ^0.2.2
   flutter_recorder: ^1.1.2
-  record: ^6.0.0
+  record: ^6.1.1
   permission_handler: ^12.0.1
   #audio control
   audio_service: ^0.18.18
@@ -45,9 +45,11 @@ dependencies:
   version: ^3.0.2
   package_info_plus: ^8.3.1
   device_info_plus: ^11.5.0
-  http: ^1.5.0
   url_launcher: ^6.3.2
-  
+  #analytics
+  http: ^1.5.0
+  aptabase_flutter: ^0.4.1
+
 dependency_overrides:
   #added support for background input capture on Android 14+
   record_android:
@@ -55,6 +57,8 @@ dependency_overrides:
       url: https://github.com/bphillips09/record.git
       path: record_android
       ref: master
+  package_info_plus: ^8.3.1
+  device_info_plus: ^11.5.0
 
 dev_dependencies:
   flutter_test:

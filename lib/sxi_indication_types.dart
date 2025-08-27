@@ -169,6 +169,22 @@ enum IndicationCode {
   }
 }
 
+// System event codes
+enum EventCode {
+  systemInformation(0),
+  unrecoverableSystemError(1),
+  systemHostAction(2),
+  unknown(-1);
+
+  const EventCode(this.value);
+  final int value;
+
+  static EventCode getByValue(int i) {
+    return EventCode.values
+        .firstWhere((x) => x.value == i, orElse: () => unknown);
+  }
+}
+
 // Service subscription status
 enum SubscriptionStatus {
   none(0),

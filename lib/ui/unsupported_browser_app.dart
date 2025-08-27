@@ -27,9 +27,6 @@ class UnsupportedBrowserApp extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Image.asset('assets/icon/icon.png',
-                          width: 128, height: 128),
-                      const SizedBox(height: 16),
                       Text('Welcome to Orbit',
                           style: TextStyle(
                             fontSize: 24,
@@ -51,7 +48,40 @@ class UnsupportedBrowserApp extends StatelessWidget {
                             color: onSurfaceColor,
                           ),
                           textAlign: TextAlign.center),
-                      const SizedBox(height: 64),
+                      const SizedBox(height: 16),
+                      RichText(
+                        textAlign: TextAlign.center,
+                        text: TextSpan(
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: onSurfaceColor,
+                          ),
+                          children: [
+                            const TextSpan(
+                                text:
+                                    'Native versions of Orbit can be downloaded '),
+                            TextSpan(
+                              text: 'here',
+                              style: TextStyle(
+                                color: linkColor,
+                                decoration: TextDecoration.underline,
+                              ),
+                              recognizer: TapGestureRecognizer()
+                                ..onTap = () {
+                                  launchUrl(
+                                    Uri.parse(
+                                        'https://github.com/bphillips09/orbit/releases/latest'),
+                                    webOnlyWindowName: '_blank',
+                                  );
+                                },
+                            ),
+                            const TextSpan(text: '.'),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      Divider(color: onSurfaceColor, thickness: 1),
+                      const SizedBox(height: 32),
                       const Icon(Icons.usb_off, size: 64),
                       const SizedBox(height: 16),
                       Text('Browser Not Supported',
@@ -120,37 +150,6 @@ class UnsupportedBrowserApp extends StatelessWidget {
                                 ..onTap = () {
                                   launchUrl(
                                     Uri.parse('https://www.opera.com/'),
-                                    webOnlyWindowName: '_blank',
-                                  );
-                                },
-                            ),
-                            const TextSpan(text: '.'),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      RichText(
-                        textAlign: TextAlign.center,
-                        text: TextSpan(
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: onSurfaceColor,
-                          ),
-                          children: [
-                            const TextSpan(
-                                text:
-                                    'Native versions of Orbit can be downloaded '),
-                            TextSpan(
-                              text: 'here',
-                              style: TextStyle(
-                                color: linkColor,
-                                decoration: TextDecoration.underline,
-                              ),
-                              recognizer: TapGestureRecognizer()
-                                ..onTap = () {
-                                  launchUrl(
-                                    Uri.parse(
-                                        'https://github.com/bphillips09/orbit/releases/latest'),
                                     webOnlyWindowName: '_blank',
                                   );
                                 },

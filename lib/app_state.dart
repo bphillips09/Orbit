@@ -9,9 +9,11 @@ import 'package:orbit/data/data_handlers.dart';
 import 'package:orbit/helpers.dart';
 import 'package:orbit/metadata/signal_quality.dart';
 import 'package:orbit/storage/storage_data.dart';
+import 'package:orbit/telemetry/telemetry.dart';
 import 'package:orbit/ui/preset.dart';
 import 'package:logger/logger.dart';
 import 'package:orbit/logging.dart';
+import 'package:scaled_app/scaled_app.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/data/favorite.dart';
 import 'package:orbit/data/favorites_on_air_entry.dart';
@@ -40,11 +42,14 @@ class AppState extends ChangeNotifier {
   bool isScanActive = false;
   bool isTuneMixActive = false;
   ThemeMode themeMode = ThemeMode.dark;
-  double uiScale = 1.0;
+  double textScale = 1.0;
+  double uiScale = 720;
   Level logLevel = kDebugMode ? Level.debug : Level.info;
   // Audio sample rate in Hz (configurable)
   int audioSampleRate = 48000;
   int secondaryBaudRate = 460800;
+  // What hardware/media skip keys should control
+  MediaKeyBehavior mediaKeyBehavior = MediaKeyBehavior.channel;
   int _lastSid = 0;
   bool linkTraceEnabled = false;
   final Set<DataServiceIdentifier> monitoredDataServices =
@@ -68,6 +73,7 @@ class AppState extends ChangeNotifier {
   int _currentCategory = 0;
   int _currentChannel = 0;
   int _currentSid = 0;
+  int _presetCycleIndex = -1;
   int _signalStatus = 0;
   bool _antennaConnected = false;
   bool _audioExpected = false;
@@ -114,6 +120,7 @@ class AppState extends ChangeNotifier {
   int get signalQuality => _signalStatus;
   int get currentChannel => _currentChannel;
   int get currentSid => _currentSid;
+  int get presetCycleIndex => _presetCycleIndex;
   int get subscriptionStatus => _subscriptionStatus;
   String get subscriptionReasonText => _subscriptionReasonText;
   String get subscriptionPhoneNumber => _subscriptionPhoneNumber;
@@ -297,10 +304,26 @@ class AppState extends ChangeNotifier {
     themeMode =
         ThemeMode.values[themeModeIndex.clamp(0, ThemeMode.values.length - 1)];
 
-    uiScale = await storageData.load(
-      SaveDataType.uiScale,
+    textScale = await storageData.load(
+      SaveDataType.textScale,
       defaultValue: 1.0,
     );
+
+    // Load design height for scaled layout
+    uiScale = await storageData.load(
+      SaveDataType.interfaceScale,
+      defaultValue: 720.0,
+    );
+    // Clamp to avoid extreme scaling causing invalid constraints
+    uiScale = _clampDesignHeightForDevice(uiScale);
+
+    // Apply current design height to scaled binding
+    try {
+      ScaledWidgetsFlutterBinding.instance.scaleFactor = (deviceSize) {
+        final double h = (uiScale.isFinite && uiScale > 0) ? uiScale : 720.0;
+        return deviceSize.height / h;
+      };
+    } catch (_) {}
 
     // Load Android audio route preference
     androidAudioOutputRoute = await storageData.load(
@@ -313,6 +336,14 @@ class AppState extends ChangeNotifier {
       SaveDataType.audioSampleRate,
       defaultValue: 48000,
     );
+
+    // Load media key behavior
+    final int mediaKeyBehaviorIndex = await storageData.load(
+      SaveDataType.mediaKeyBehavior,
+      defaultValue: MediaKeyBehavior.channel.index,
+    );
+    mediaKeyBehavior = MediaKeyBehavior.values[
+        mediaKeyBehaviorIndex.clamp(0, MediaKeyBehavior.values.length - 1)];
 
     notifyListeners();
   }
@@ -345,14 +376,6 @@ class AppState extends ChangeNotifier {
         matchedId: songId,
         type: FavoriteType.song,
       );
-      favoriteOnAirNotifier.value = FavoriteOnAirEvent(
-        type: FavoriteType.song,
-        matchedId: songId,
-        sid: sid,
-        channelNumber: channel,
-        artistName: matchedFavorite.artistName,
-        songName: matchedFavorite.songName,
-      );
     } catch (e) {
       logger.d('No matched favorite found for song id: $songId');
     }
@@ -368,13 +391,6 @@ class AppState extends ChangeNotifier {
         channelNumber: channel,
         matchedId: artistId,
         type: FavoriteType.artist,
-      );
-      favoriteOnAirNotifier.value = FavoriteOnAirEvent(
-        type: FavoriteType.artist,
-        matchedId: artistId,
-        sid: sid,
-        channelNumber: channel,
-        artistName: matchedFavorite.artistName,
       );
     } catch (e) {
       logger.d('No matched favorite found for artist id: $artistId');
@@ -471,6 +487,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateMediaKeyBehavior(MediaKeyBehavior behavior) {
+    mediaKeyBehavior = behavior;
+    storageData.save(SaveDataType.mediaKeyBehavior, behavior.index);
+    notifyListeners();
+  }
+
   void updateThemeMode(ThemeMode mode) {
     themeMode = mode;
     storageData.save(SaveDataType.themeMode, mode.index);
@@ -478,9 +500,46 @@ class AppState extends ChangeNotifier {
   }
 
   void updateUiScale(double scale) {
-    uiScale = scale.clamp(0.6, 2.0);
-    storageData.save(SaveDataType.uiScale, uiScale);
+    textScale = scale.clamp(0.6, 2.0);
+    storageData.save(SaveDataType.textScale, textScale);
     notifyListeners();
+  }
+
+  void updateDesignHeight(double height) {
+    // Clamp to reasonable and device-aware range
+    uiScale = _clampDesignHeightForDevice(height);
+    storageData.save(SaveDataType.interfaceScale, uiScale);
+
+    // Update binding scale factor so the change takes effect immediately
+    try {
+      ScaledWidgetsFlutterBinding.instance.scaleFactor = (deviceSize) {
+        return deviceSize.height / uiScale;
+      };
+    } catch (_) {}
+
+    notifyListeners();
+  }
+
+  double _clampDesignHeightForDevice(double requested) {
+    // Ensure scale factor is not excessively large, which can yield tiny
+    // logical dimensions and invalid constraints. We cap scale at 2.0.
+    const double minAbsolute = 360.0;
+    const double maxAbsolute = 2160.0;
+    const double maxScale = 2.0;
+    try {
+      final view = WidgetsBinding.instance.platformDispatcher.implicitView;
+      if (view == null) {
+        return requested.clamp(minAbsolute, maxAbsolute);
+      }
+      final double deviceLogicalHeight =
+          view.physicalSize.height / view.devicePixelRatio;
+      final double minByScale = deviceLogicalHeight / maxScale;
+      final double minAllowed =
+          minByScale < minAbsolute ? minAbsolute : minByScale;
+      return requested.clamp(minAllowed, maxAbsolute);
+    } catch (_) {
+      return requested.clamp(minAbsolute, maxAbsolute);
+    }
   }
 
   void updateLogLevel(Level level) {
@@ -547,6 +606,12 @@ class AppState extends ChangeNotifier {
     _subscriptionStatus = status;
     _subscriptionReasonText = reasonText;
     _subscriptionPhoneNumber = phoneNumber;
+    try {
+      Telemetry.event('subscription_status_updated', {
+        'subscriptionStatus': SubscriptionStatus.getByValue(status),
+        'subscriptionReasonText': reasonText,
+      });
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -594,6 +659,23 @@ class AppState extends ChangeNotifier {
     _maxTuneMix = maxTuneMix;
     _maxSportsFlash = maxSportsFlash;
     _maxTWNow = maxTWNow;
+
+    Telemetry.event('module_configured', {
+      'moduleType': _moduleType,
+      'moduleHWRev': _moduleHWRev,
+      'moduleSWRev': _moduleSWRev,
+      'sxiRev': _sxiRev,
+      'basebandRev': _basebandRev,
+      'hardwareDecoderRev': _hardwareDecoderRev,
+      'rfRev': _rfRev,
+      'splRev': _splRev,
+      'bufferDuration': _bufferDuration,
+      'maxSmartFavorites': _maxSmartFavorites,
+      'maxTuneMix': _maxTuneMix,
+      'maxSportsFlash': _maxSportsFlash,
+      'maxTWNow': _maxTWNow,
+    });
+
     notifyListeners();
   }
 
@@ -821,6 +903,8 @@ class AppState extends ChangeNotifier {
     }
     _currentChannel = channel;
     _currentSid = sid;
+    // Keep preset cycling index in sync only when tuned SID is a preset
+    _presetCycleIndex = presets.indexWhere((p) => p.sid == sid && p.sid != 0);
     nowPlaying
       ..channelNumber = channel
       ..sid = sid;
@@ -973,6 +1057,13 @@ class AppState extends ChangeNotifier {
       _removeFavoriteOnAirEntry(sid: sid, matchedId: matchedId, type: type);
     });
 
+    favoriteOnAirNotifier.value = FavoriteOnAirEvent(
+      type: type,
+      matchedId: matchedId,
+      sid: sid,
+      channelNumber: channelNumber,
+    );
+
     notifyListeners();
   }
 
@@ -1080,6 +1171,12 @@ class PlaybackInfo {
 }
 
 enum AppPlaybackState { live, paused, recordedContent, stopped }
+
+enum MediaKeyBehavior {
+  channel,
+  presetCycle,
+  track,
+}
 
 class PropertyValueNotifier<T> extends ValueNotifier<T> {
   PropertyValueNotifier(super.value);

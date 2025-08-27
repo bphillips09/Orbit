@@ -941,7 +941,7 @@ class SXiTimeIndication extends SXiPayload {
   }
 }
 
-// Event indication (I don't think this is used)
+// Event indication
 class SXiEventIndication extends SXiPayload {
   final int eventCode;
   final List<int> eventData;
