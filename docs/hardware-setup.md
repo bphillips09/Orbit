@@ -80,7 +80,7 @@ Optional Dynavin female cable
 ```
 
 ## Known-Working Adapters for All Platforms
-- [USB UART](https://www.amazon.com/dp/B09F6FGMD7)
+- [USB UART](https://www.amazon.com/dp/B09F3196FB)
 - [USB Audio-in](https://www.amazon.com/dp/B00NMXY2MO)
 - [12V 1A DC Power Supply](https://www.amazon.com/dp/B0BX5F3562)
 - [12V Cigarette Lighter Adapters](https://www.amazon.com/dp/B0CNJQC7T3)
