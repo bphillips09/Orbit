@@ -19,6 +19,7 @@ class AudioController {
   bool _recordStreamStarted = false;
   bool _isolateInitialized = false;
   bool _isStarted = false;
+  String? _androidAudioOutputRoute;
 
   final AudioStream _audioStream = getAudioStream();
   final PCMFormat format = PCMFormat.f32le;
@@ -27,6 +28,8 @@ class AudioController {
   final recorder = Recorder.instance;
   final record = AudioRecorder();
   bool _isPlayingTone = false;
+  StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
+  bool _wasPausedByInterruption = false;
 
   final _androidAudioManager =
       !kIsWeb && !kIsWasm && defaultTargetPlatform == TargetPlatform.android
@@ -80,6 +83,30 @@ class AudioController {
       return true;
     }
     return false;
+  }
+
+  Future<void> _applyPreferredAndroidRoute() async {
+    if (!kIsWeb &&
+        !kIsWasm &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      final route = _androidAudioOutputRoute;
+      logger.d('Applying Android audio route preference: $route');
+      switch (route) {
+        case 'Receiver':
+          await switchToReceiver();
+          break;
+        case 'Headphones':
+          await switchToHeadphones();
+          break;
+        case 'Bluetooth':
+          await switchToBluetooth();
+          break;
+        case 'Speaker':
+        default:
+          await switchToSpeaker();
+          break;
+      }
+    }
   }
 
   // Ensure microphone permission is granted where needed (Web/Wasm/Android)
@@ -140,15 +167,48 @@ class AudioController {
     }
     // Initialize the AudioSession (runs on the main isolate)
     var session = await AudioSession.instance;
-    if (await session.setActive(true)) {
+    if (await session.setActive(true, androidWillPauseWhenDucked: true)) {
       logger.i('Audio session active');
     } else {
       logger.e('Audio session setup failed');
       return;
     }
 
+    // Centralize handling of interruptions
+    try {
+      await _interruptionSub?.cancel();
+    } catch (_) {}
+    _interruptionSub = session.interruptionEventStream.listen((event) async {
+      logger.d('Audio interruption: begin=${event.begin} type=${event.type}');
+      if (event.begin) {
+        // Pause capture if currently recording
+        try {
+          if (_recordStreamStarted) {
+            final isRec = await record.isRecording();
+            final isPaused = await record.isPaused();
+            if (isRec && !isPaused) {
+              _wasPausedByInterruption = true;
+              await record.pause();
+            }
+          }
+        } catch (_) {}
+      } else {
+        // Resume only if we paused due to the interruption
+        if (_wasPausedByInterruption) {
+          // Re-apply preferred route first to avoid stale routing after Assistant
+          await _applyPreferredAndroidRoute();
+          _wasPausedByInterruption = false;
+          try {
+            await record.resume();
+          } catch (_) {}
+        }
+      }
+    });
+
     if (usesRecordPlugin) {
       _useIsolate = false;
+      // Remember route for re-application after interruption
+      _androidAudioOutputRoute = androidAudioOutputRoute;
       if (defaultTargetPlatform == TargetPlatform.android) {
         PermissionStatus status = await Permission.microphone.request();
         if (!status.isGranted) {
@@ -165,27 +225,7 @@ class AudioController {
       _audioStreamInitialized = true;
 
       // Apply preferred Android audio route after audio is active
-      if (!kIsWeb &&
-          !kIsWasm &&
-          defaultTargetPlatform == TargetPlatform.android) {
-        logger.d(
-            'Applying Android audio route preference: $androidAudioOutputRoute');
-        switch (androidAudioOutputRoute) {
-          case 'Receiver':
-            await switchToReceiver();
-            break;
-          case 'Headphones':
-            await switchToHeadphones();
-            break;
-          case 'Bluetooth':
-            await switchToBluetooth();
-            break;
-          case 'Speaker':
-          default:
-            await switchToSpeaker();
-            break;
-        }
-      }
+      await _applyPreferredAndroidRoute();
 
       _audioStream.resume();
       _runAudioInputNonIsolate(
@@ -288,6 +328,8 @@ class AudioController {
         manageBluetooth: false,
         audioSource: AndroidAudioSource.unprocessed,
       ),
+      // Disable plugin-level auto pause/resume; handled by AudioSession above.
+      audioInterruption: AudioInterruptionMode.none,
       device: device,
     ));
     _recordStreamStarted = true;
@@ -312,6 +354,11 @@ class AudioController {
 
   void stopAudioThread() {
     logger.t('stopAudioThread: started=$_isStarted, useIsolate=$_useIsolate');
+    // Stop interruption subscription
+    try {
+      _interruptionSub?.cancel();
+    } catch (_) {}
+    _interruptionSub = null;
     if (_useIsolate) {
       // Only attempt to send stop if isolate was fully initialized
       if (_isolateInitialized) {

@@ -128,7 +128,7 @@ class OrbitApp extends StatelessWidget {
             builder: (context, child) {
               // Apply UI scaling when the scale setting is changed
               final mq = MediaQuery.of(context);
-              final scale = appState.uiScale <= 0 ? 1.0 : appState.uiScale;
+              final scale = appState.textScale <= 0 ? 1.0 : appState.textScale;
               return MediaQuery(
                 data: mq.copyWith(
                   textScaler: TextScaler.linear(scale),
@@ -190,7 +190,7 @@ class MainPageState extends State<MainPage> {
   void initState() {
     super.initState();
 
-    logger.d('Initializing MainPageState');
+    logger.d('Initializing...');
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
@@ -213,6 +213,8 @@ class MainPageState extends State<MainPage> {
             usage: AndroidAudioUsage.media,
           ),
           androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+          // Treat ducking as pause so we fully yield during Assistant, calls, etc.
+          androidWillPauseWhenDucked: true,
         ),
       );
 
@@ -233,7 +235,7 @@ class MainPageState extends State<MainPage> {
       // Listen for playback changes
       appState.playbackInfoNotifier.addListener(onPlaybackInfoChanged);
       appState.playbackStateNotifier.addListener(onPlaybackStateChanged);
-      appState.favoriteOnAirNotifier.addListener(_onFavoriteOnAir);
+      appState.favoriteOnAirNotifier.addListener(onFavoriteOnAir);
 
       try {
         await startupSequence();
@@ -718,12 +720,13 @@ class MainPageState extends State<MainPage> {
     audioController.dispose();
     appState.playbackInfoNotifier.removeListener(onPlaybackInfoChanged);
     appState.playbackStateNotifier.removeListener(onPlaybackStateChanged);
-    appState.favoriteOnAirNotifier.removeListener(_onFavoriteOnAir);
+    appState.favoriteOnAirNotifier.removeListener(onFavoriteOnAir);
     channelTextFocusNode.dispose();
     super.dispose();
   }
 
-  void _onFavoriteOnAir() {
+  void onFavoriteOnAir() {
+    logger.d('Favorite On Air Event: ${appState.favoriteOnAirNotifier.value}');
     final evt = appState.favoriteOnAirNotifier.value;
     if (!mounted) return;
     if (evt != null) {
@@ -1058,6 +1061,29 @@ class MainPageState extends State<MainPage> {
 
   // Build the text that may show in the app bar
   Widget _buildAppBarTitle(BuildContext context, AppState appState) {
+    // If any favorites are on air, show a centered quick-access button
+    if (appState.showOnAirFavoritesPrompt &&
+        appState.favoritesOnAirEntries.isNotEmpty &&
+        _lastOnAirPromptAt != null) {
+      final hasSong = appState.favoritesOnAirEntries
+          .any((e) => e.type == FavoriteType.song);
+      final label = 'Favorite ${hasSong ? 'Song' : 'Artist'} On Air';
+      final colorScheme = Theme.of(context).colorScheme;
+      return TextButton.icon(
+        onPressed: () {
+          FavoritesOnAirDialogHelper.show(
+            context: context,
+            appState: appState,
+            deviceLayer: deviceLayer,
+          );
+        },
+        icon: Icon(Icons.favorite, color: colorScheme.primary),
+        label: Text(
+          label,
+          style: TextStyle(color: colorScheme.primary),
+        ),
+      );
+    }
     if (appState.updatingCategories || appState.updatingChannels) {
       return Text(
         'Updating ${appState.updatingChannels ? 'Channels' : 'Categories'}...',
@@ -1069,29 +1095,6 @@ class MainPageState extends State<MainPage> {
     if (appState.isTuneMixActive) {
       return Text('Presets Mix');
     }
-    // If any favorites are on air, show a centered quick-access button
-    if (appState.showOnAirFavoritesPrompt &&
-        appState.favoritesOnAirEntries.isNotEmpty &&
-        _lastOnAirPromptAt != null) {
-      final hasSong = appState.favoritesOnAirEntries
-          .any((e) => e.type == FavoriteType.song);
-      final label = 'Favorite ${hasSong ? 'Song' : 'Artist'} On Air';
-      final cs = Theme.of(context).colorScheme;
-      return TextButton.icon(
-        onPressed: () {
-          FavoritesOnAirDialogHelper.show(
-            context: context,
-            appState: appState,
-            deviceLayer: deviceLayer,
-          );
-        },
-        icon: Icon(Icons.favorite, color: cs.primary),
-        label: Text(
-          label,
-          style: TextStyle(color: cs.primary),
-        ),
-      );
-    }
     return const SizedBox.shrink();
   }
 
@@ -1099,443 +1102,470 @@ class MainPageState extends State<MainPage> {
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, appState, child) {
-        return Scaffold(
-          resizeToAvoidBottomInset: false,
-          appBar: AppBar(
-            title: _buildAppBarTitle(context, appState),
-            centerTitle: true,
-            leading: IconButton(
-              icon: Icon(getSignalIcon(
-                appState.signalQuality,
-                isAntennaConnected: appState.isAntennaConnected,
-              )),
-              tooltip:
-                  appState.isAntennaConnected ? 'Signal quality' : 'No antenna',
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) =>
-                      SignalQualityDialog(deviceLayer: deviceLayer),
-                );
-              },
-            ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.settings),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => SettingsPage(mainPage: this),
-                    ),
-                  );
-                },
+        return Stack(
+          children: [
+            Scaffold(
+              resizeToAvoidBottomInset: false,
+              appBar: AppBar(
+                title: _buildAppBarTitle(context, appState),
+                centerTitle: true,
+                leading: IconButton(
+                  icon: Icon(getSignalIcon(
+                    appState.signalQuality,
+                    isAntennaConnected: appState.isAntennaConnected,
+                  )),
+                  tooltip: appState.isAntennaConnected
+                      ? 'Signal quality'
+                      : 'No antenna',
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) =>
+                          SignalQualityDialog(deviceLayer: deviceLayer),
+                    );
+                  },
+                ),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.settings),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => SettingsPage(mainPage: this),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
-            ],
-          ),
-          body: Stack(
-            children: [
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final isLandscapeMode = isLandscape(context);
+              body: Stack(
+                children: [
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isLandscapeMode = isLandscape(context);
 
-                  if (isLandscapeMode) {
-                    return Column(
-                      children: [
-                        Expanded(
-                          child: Center(
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(maxWidth: 700),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  // Channel info
-                                  GestureDetector(
-                                    onTap: () {
-                                      ChannelInfoDialog.show(
-                                        context,
-                                        appState: appState,
-                                        sid: appState.currentSid,
-                                        deviceLayer: deviceLayer,
-                                        onTuneAlign: (channelNumber) {
-                                          // Tune to the channel
-                                          final cfgCmd =
-                                              SXiSelectChannelCommand(
-                                            ChanSelectionType
-                                                .tuneUsingChannelNumber,
-                                            channelNumber,
-                                            0xFF,
-                                            Overrides.all(),
-                                            AudioRoutingType.routeToAudio,
-                                          );
-                                          deviceLayer
-                                              .sendControlCommand(cfgCmd);
-                                        },
-                                      );
-                                    },
-                                    child: // Channel info
-                                        currentChannelImage != null
-                                            ? ConstrainedBox(
-                                                constraints: BoxConstraints(
-                                                  maxWidth: 400,
-                                                  maxHeight: 60,
-                                                ),
-                                                child: currentChannelImage!,
-                                              )
-                                            : Container(
-                                                height: 60,
-                                                width: 400,
-                                                alignment: Alignment.center,
-                                                child: Text(
-                                                  appState
-                                                      .nowPlaying.channelName,
-                                                  textAlign: TextAlign.center,
-                                                  style: TextStyle(
-                                                    fontSize: 32,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                  ),
-
-                                  SizedBox(height: 40),
-                                  // Main content: Album art + info
-                                  Row(
+                      if (isLandscapeMode) {
+                        return Column(
+                          children: [
+                            Expanded(
+                              child: Center(
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(maxWidth: 700),
+                                  child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
                                     children: [
-                                      // Album Art
+                                      // Channel info
                                       GestureDetector(
                                         onTap: () {
-                                          FavoriteDialogHelper.show(
-                                            context: context,
+                                          ChannelInfoDialog.show(
+                                            context,
                                             appState: appState,
+                                            sid: appState.currentSid,
                                             deviceLayer: deviceLayer,
+                                            onTuneAlign: (channelNumber) {
+                                              // Tune to the channel
+                                              final cfgCmd =
+                                                  SXiSelectChannelCommand(
+                                                ChanSelectionType
+                                                    .tuneUsingChannelNumber,
+                                                channelNumber,
+                                                0xFF,
+                                                Overrides.all(),
+                                                AudioRoutingType.routeToAudio,
+                                              );
+                                              deviceLayer
+                                                  .sendControlCommand(cfgCmd);
+                                            },
                                           );
                                         },
-                                        child: AlbumArt(
-                                          size: 180,
-                                          filterQuality: FilterQuality.high,
-                                          imageBytes:
-                                              appState.nowPlaying.image.isEmpty
+                                        child: // Channel info
+                                            currentChannelImage != null
+                                                ? ConstrainedBox(
+                                                    constraints: BoxConstraints(
+                                                      maxWidth: 400,
+                                                      maxHeight: 60,
+                                                    ),
+                                                    child: currentChannelImage!,
+                                                  )
+                                                : Container(
+                                                    height: 60,
+                                                    width: 400,
+                                                    alignment: Alignment.center,
+                                                    child: Text(
+                                                      appState.nowPlaying
+                                                          .channelName,
+                                                      textAlign:
+                                                          TextAlign.center,
+                                                      style: TextStyle(
+                                                        fontSize: 32,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                      ),
+
+                                      SizedBox(height: 40),
+                                      // Main content: Album art + info
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          // Album Art
+                                          GestureDetector(
+                                            onTap: () {
+                                              FavoriteDialogHelper.show(
+                                                context: context,
+                                                appState: appState,
+                                                deviceLayer: deviceLayer,
+                                              );
+                                            },
+                                            child: AlbumArt(
+                                              size: 180,
+                                              filterQuality: FilterQuality.high,
+                                              imageBytes: appState
+                                                      .nowPlaying.image.isEmpty
                                                   ? null
                                                   : appState.nowPlaying.image,
-                                          borderRadius: 8.0,
-                                          borderWidth: 2.0,
-                                          placeholder: Icon(
-                                            getCategoryIcon(
-                                              appState.currentCategoryString,
+                                              borderRadius: 8.0,
+                                              borderWidth: 2.0,
+                                              placeholder: Icon(
+                                                getCategoryIcon(
+                                                  appState
+                                                      .currentCategoryString,
+                                                ),
+                                                size: 64,
+                                              ),
                                             ),
-                                            size: 64,
                                           ),
-                                        ),
-                                      ),
-                                      SizedBox(width: 36),
-                                      // Song Info
-                                      Flexible(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.center,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            TextButton(
-                                              onPressed: () {
-                                                _showSelectChannelFromEPG(
-                                                  initialCategory:
-                                                      appState.currentCategory,
-                                                );
-                                              },
-                                              child: Text(
-                                                appState.currentCategoryString,
-                                                style: TextStyle(fontSize: 20),
-                                              ),
-                                            ),
-                                            SizedBox(height: 8),
-                                            GestureDetector(
-                                              onTap: () {
-                                                FavoriteDialogHelper.show(
-                                                  context: context,
-                                                  appState: appState,
-                                                  deviceLayer: deviceLayer,
-                                                );
-                                              },
-                                              child: Text(
-                                                appState.nowPlaying.songTitle,
-                                                style: TextStyle(
-                                                  fontSize: 28,
-                                                  fontWeight: FontWeight.bold,
+                                          SizedBox(width: 36),
+                                          // Song Info
+                                          Flexible(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.center,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                TextButton(
+                                                  onPressed: () {
+                                                    _showSelectChannelFromEPG(
+                                                      initialCategory: appState
+                                                          .currentCategory,
+                                                    );
+                                                  },
+                                                  child: Text(
+                                                    appState
+                                                        .currentCategoryString,
+                                                    style:
+                                                        TextStyle(fontSize: 20),
+                                                  ),
                                                 ),
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                                textAlign: TextAlign.center,
-                                              ),
-                                            ),
-                                            SizedBox(height: 8),
-                                            GestureDetector(
-                                              onTap: () {
-                                                FavoriteDialogHelper.show(
-                                                  context: context,
-                                                  appState: appState,
-                                                  deviceLayer: deviceLayer,
-                                                );
-                                              },
-                                              child: Text(
-                                                appState.nowPlaying.artistTitle,
-                                                style: TextStyle(
-                                                  fontSize: 20,
-                                                  color: Colors.grey,
+                                                SizedBox(height: 8),
+                                                GestureDetector(
+                                                  onTap: () {
+                                                    FavoriteDialogHelper.show(
+                                                      context: context,
+                                                      appState: appState,
+                                                      deviceLayer: deviceLayer,
+                                                    );
+                                                  },
+                                                  child: Text(
+                                                    appState
+                                                        .nowPlaying.songTitle,
+                                                    style: TextStyle(
+                                                      fontSize: 28,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                    maxLines: 2,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    textAlign: TextAlign.center,
+                                                  ),
                                                 ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                textAlign: TextAlign.center,
-                                              ),
+                                                SizedBox(height: 8),
+                                                GestureDetector(
+                                                  onTap: () {
+                                                    FavoriteDialogHelper.show(
+                                                      context: context,
+                                                      appState: appState,
+                                                      deviceLayer: deviceLayer,
+                                                    );
+                                                  },
+                                                  child: Text(
+                                                    appState
+                                                        .nowPlaying.artistTitle,
+                                                    style: TextStyle(
+                                                      fontSize: 20,
+                                                      color: Colors.grey,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    textAlign: TextAlign.center,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                          ],
-                                        ),
+                                          ),
+                                        ],
                                       ),
+                                      SizedBox(height: 40),
+                                      // Controls: Channel + Playback in one row
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          // Channel Controls
+                                          _buildChannelControls(),
+                                          SizedBox(width: 32),
+                                          // Vertical Separator
+                                          Container(
+                                            width: 1,
+                                            height: 60,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .outline
+                                                .withValues(alpha: 0.3),
+                                          ),
+                                          SizedBox(width: 32),
+                                          // Playback Controls
+                                          _buildPlaybackControls(),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      // Contextual actions
+                                      _buildActionButtons(isLandscape: true),
+                                      // Transport slider (space reserved to avoid layout shift)
+                                      SizedBox(height: 12),
+                                      _buildTransportArea(),
                                     ],
                                   ),
-                                  SizedBox(height: 40),
-                                  // Controls: Channel + Playback in one row
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      // Channel Controls
-                                      _buildChannelControls(),
-                                      SizedBox(width: 32),
-                                      // Vertical Separator
-                                      Container(
-                                        width: 1,
-                                        height: 60,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .outline
-                                            .withValues(alpha: 0.3),
-                                      ),
-                                      SizedBox(width: 32),
-                                      // Playback Controls
-                                      _buildPlaybackControls(),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  // Contextual actions
-                                  _buildActionButtons(isLandscape: true),
-                                  // Transport slider (space reserved to avoid layout shift)
-                                  SizedBox(height: 12),
-                                  _buildTransportArea(),
-                                ],
+                                ),
                               ),
                             ),
-                          ),
-                        ),
-                        // Contextual actions row
-                        // Preset carousel at bottom
-                        SizedBox(
-                          height: 140,
-                          child: PresetCarousel(
-                            key: presetCarouselKey,
-                            presets: appState.presets,
-                            currentSid: appState.currentSid,
-                            logoProvider: (sid) {
-                              final bytes =
-                                  appState.storageData.getImageForSid(sid);
-                              if (bytes.isEmpty) return null;
-                              return Uint8List.fromList(bytes);
-                            },
-                            categoryNameProvider: (sid) {
-                              final channel = appState.sidMap[sid];
-                              if (channel == null) return '';
-                              return appState.categories[channel.catId] ?? '';
-                            },
-                            onPresetTap: (sid) {
-                              final cfgCmd = SXiSelectChannelCommand(
-                                ChanSelectionType.tuneUsingSID,
-                                sid,
-                                0xFF,
-                                Overrides.all(),
-                                AudioRoutingType.routeToAudio,
-                              );
-                              deviceLayer.sendControlCommand(cfgCmd);
-                            },
-                            onPresetLongPress: onPresetLongPress,
-                          ),
-                        ),
-                      ],
-                    );
-                  } else {
-                    // Portrait layout (original)
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        // Current Channel Name or Image
-                        SizedBox(
-                          height: 35,
-                          width: 300,
-                          child: GestureDetector(
-                            onTap: () {
-                              ChannelInfoDialog.show(
-                                context,
-                                appState: appState,
-                                sid: appState.currentSid,
-                                deviceLayer: deviceLayer,
-                                onTuneAlign: (channelNumber) {
-                                  // Tune to the channel
+                            // Contextual actions row
+                            // Preset carousel at bottom
+                            SizedBox(
+                              height: 140,
+                              child: PresetCarousel(
+                                key: presetCarouselKey,
+                                presets: appState.presets,
+                                currentSid: appState.currentSid,
+                                logoProvider: (sid) {
+                                  final bytes =
+                                      appState.storageData.getImageForSid(sid);
+                                  if (bytes.isEmpty) return null;
+                                  return Uint8List.fromList(bytes);
+                                },
+                                categoryNameProvider: (sid) {
+                                  final channel = appState.sidMap[sid];
+                                  if (channel == null) return '';
+                                  return appState.categories[channel.catId] ??
+                                      '';
+                                },
+                                onPresetTap: (sid) {
                                   final cfgCmd = SXiSelectChannelCommand(
-                                    ChanSelectionType.tuneUsingChannelNumber,
-                                    channelNumber,
+                                    ChanSelectionType.tuneUsingSID,
+                                    sid,
                                     0xFF,
                                     Overrides.all(),
                                     AudioRoutingType.routeToAudio,
                                   );
                                   deviceLayer.sendControlCommand(cfgCmd);
                                 },
-                              );
-                            },
-                            child: currentChannelImage ??
-                                Text(
-                                  appState.nowPlaying.channelName,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                          ),
-                        ),
-
-                        // Current Channel Category
-                        TextButton(
-                          onPressed: () {
-                            _showSelectChannelFromEPG(
-                              initialCategory: appState.currentCategory,
-                            );
-                          },
-                          child: Text(
-                            appState.currentCategoryString,
-                            style: const TextStyle(fontSize: 16),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        // Current track album art
-                        GestureDetector(
-                          onTap: () {
-                            FavoriteDialogHelper.show(
-                              context: context,
-                              appState: appState,
-                              deviceLayer: deviceLayer,
-                            );
-                          },
-                          child: AlbumArt(
-                            size: 128,
-                            filterQuality: FilterQuality.high,
-                            imageBytes: appState.nowPlaying.image.isEmpty
-                                ? null
-                                : appState.nowPlaying.image,
-                            borderRadius: 8.0,
-                            borderWidth: 2.0,
-                            placeholder: Icon(
-                              getCategoryIcon(appState.currentCategoryString),
-                              size: 44,
+                                onPresetLongPress: onPresetLongPress,
+                              ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        // Current track
-                        GestureDetector(
-                          onTap: () {
-                            FavoriteDialogHelper.show(
-                              context: context,
-                              appState: appState,
-                              deviceLayer: deviceLayer,
-                            );
-                          },
-                          child: Text(
-                            appState.nowPlaying.songTitle,
-                            style: TextStyle(fontSize: 20),
-                          ),
-                        ),
-                        // Current artist
-                        GestureDetector(
-                          onTap: () {
-                            FavoriteDialogHelper.show(
-                              context: context,
-                              appState: appState,
-                              deviceLayer: deviceLayer,
-                            );
-                          },
-                          child: Text(
-                            appState.nowPlaying.artistTitle,
-                            style: TextStyle(fontSize: 18, color: Colors.grey),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        //  Playback controls
-                        _buildPlaybackControls(),
-                        //  Channel control
-                        _buildChannelControls(),
-                        const SizedBox(height: 10),
-                        _buildActionButtons(isLandscape: false),
-                        _buildTransportArea(),
-                        Expanded(
-                          child: PresetCarousel(
-                            key: presetCarouselKey,
-                            presets: appState.presets,
-                            currentSid: appState.currentSid,
-                            logoProvider: (sid) {
-                              final bytes = appState.storageData.getImageForSid(
-                                sid,
-                              );
-                              if (bytes.isEmpty) return null;
-                              return Uint8List.fromList(bytes);
-                            },
-                            categoryNameProvider: (sid) {
-                              final channel = appState.sidMap[sid];
-                              if (channel == null) return '';
-                              return appState.categories[channel.catId] ?? '';
-                            },
-                            onPresetTap: (sid) {
-                              final cfgCmd = SXiSelectChannelCommand(
-                                ChanSelectionType.tuneUsingSID,
-                                sid,
-                                0xFF,
-                                Overrides.all(),
-                                AudioRoutingType.routeToAudio,
-                              );
-                              deviceLayer.sendControlCommand(cfgCmd);
-                            },
-                            onPresetLongPress: onPresetLongPress,
-                          ),
-                        ),
-                      ],
-                    );
-                  }
-                },
-              ),
+                          ],
+                        );
+                      } else {
+                        // Portrait layout (original)
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // Current Channel Name or Image
+                            SizedBox(
+                              height: 35,
+                              width: 300,
+                              child: GestureDetector(
+                                onTap: () {
+                                  ChannelInfoDialog.show(
+                                    context,
+                                    appState: appState,
+                                    sid: appState.currentSid,
+                                    deviceLayer: deviceLayer,
+                                    onTuneAlign: (channelNumber) {
+                                      // Tune to the channel
+                                      final cfgCmd = SXiSelectChannelCommand(
+                                        ChanSelectionType
+                                            .tuneUsingChannelNumber,
+                                        channelNumber,
+                                        0xFF,
+                                        Overrides.all(),
+                                        AudioRoutingType.routeToAudio,
+                                      );
+                                      deviceLayer.sendControlCommand(cfgCmd);
+                                    },
+                                  );
+                                },
+                                child: currentChannelImage ??
+                                    Text(
+                                      appState.nowPlaying.channelName,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                              ),
+                            ),
 
-              // Loading Overlay
-              if (_isLoading) ...[
-                Container(
-                  color: Colors.black54,
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const CircularProgressIndicator(),
-                        const SizedBox(height: 20),
-                        Text(
-                          _connectionDetails,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white, fontSize: 18),
-                        ),
-                      ],
-                    ),
+                            // Current Channel Category
+                            TextButton(
+                              onPressed: () {
+                                _showSelectChannelFromEPG(
+                                  initialCategory: appState.currentCategory,
+                                );
+                              },
+                              child: Text(
+                                appState.currentCategoryString,
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            // Current track album art
+                            GestureDetector(
+                              onTap: () {
+                                FavoriteDialogHelper.show(
+                                  context: context,
+                                  appState: appState,
+                                  deviceLayer: deviceLayer,
+                                );
+                              },
+                              child: AlbumArt(
+                                size: 128,
+                                filterQuality: FilterQuality.high,
+                                imageBytes: appState.nowPlaying.image.isEmpty
+                                    ? null
+                                    : appState.nowPlaying.image,
+                                borderRadius: 8.0,
+                                borderWidth: 2.0,
+                                placeholder: Icon(
+                                  getCategoryIcon(
+                                      appState.currentCategoryString),
+                                  size: 44,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            // Current track
+                            GestureDetector(
+                              onTap: () {
+                                FavoriteDialogHelper.show(
+                                  context: context,
+                                  appState: appState,
+                                  deviceLayer: deviceLayer,
+                                );
+                              },
+                              child: Text(
+                                appState.nowPlaying.songTitle,
+                                style: TextStyle(fontSize: 20),
+                              ),
+                            ),
+                            // Current artist
+                            GestureDetector(
+                              onTap: () {
+                                FavoriteDialogHelper.show(
+                                  context: context,
+                                  appState: appState,
+                                  deviceLayer: deviceLayer,
+                                );
+                              },
+                              child: Text(
+                                appState.nowPlaying.artistTitle,
+                                style:
+                                    TextStyle(fontSize: 18, color: Colors.grey),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            //  Playback controls
+                            _buildPlaybackControls(),
+                            //  Channel control
+                            _buildChannelControls(),
+                            const SizedBox(height: 10),
+                            _buildActionButtons(isLandscape: false),
+                            _buildTransportArea(),
+                            Expanded(
+                              child: PresetCarousel(
+                                key: presetCarouselKey,
+                                presets: appState.presets,
+                                currentSid: appState.currentSid,
+                                logoProvider: (sid) {
+                                  final bytes =
+                                      appState.storageData.getImageForSid(
+                                    sid,
+                                  );
+                                  if (bytes.isEmpty) return null;
+                                  return Uint8List.fromList(bytes);
+                                },
+                                categoryNameProvider: (sid) {
+                                  final channel = appState.sidMap[sid];
+                                  if (channel == null) return '';
+                                  return appState.categories[channel.catId] ??
+                                      '';
+                                },
+                                onPresetTap: (sid) {
+                                  final cfgCmd = SXiSelectChannelCommand(
+                                    ChanSelectionType.tuneUsingSID,
+                                    sid,
+                                    0xFF,
+                                    Overrides.all(),
+                                    AudioRoutingType.routeToAudio,
+                                  );
+                                  deviceLayer.sendControlCommand(cfgCmd);
+                                },
+                                onPresetLongPress: onPresetLongPress,
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+            if (_isLoading)
+              Container(
+                color: Colors.black54,
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 20),
+                      Text(
+                        _connectionDetails,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                ) ??
+                            const TextStyle(color: Colors.white, fontSize: 18),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ],
-          ),
+              ),
+          ],
         );
       },
     );
@@ -1958,7 +1988,14 @@ class MainPageState extends State<MainPage> {
       children: [
         ElevatedButton.icon(
           onPressed: () {
-            audioServiceHandler?.skipToPrevious();
+            final cfgCmd = SXiSelectChannelCommand(
+              ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
+              appState.nowPlaying.channelNumber,
+              0xFF,
+              Overrides.all(),
+              AudioRoutingType.routeToAudio,
+            );
+            deviceLayer.sendControlCommand(cfgCmd);
           },
           label: const Text('CH'),
           icon: const Icon(Icons.keyboard_arrow_left),
@@ -2000,7 +2037,14 @@ class MainPageState extends State<MainPage> {
         SizedBox(width: spacing),
         ElevatedButton.icon(
           onPressed: () {
-            audioServiceHandler?.skipToNext();
+            final cfgCmd = SXiSelectChannelCommand(
+              ChanSelectionType.tuneToNextHigherChannelNumberInCategory,
+              appState.nowPlaying.channelNumber,
+              0xFF,
+              Overrides.all(),
+              AudioRoutingType.routeToAudio,
+            );
+            deviceLayer.sendControlCommand(cfgCmd);
           },
           label: const Text('CH'),
           icon: const Icon(Icons.keyboard_arrow_right),

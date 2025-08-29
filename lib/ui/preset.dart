@@ -36,6 +36,24 @@ class Preset {
   }
 }
 
+int? computeNextPresetSid(AppState appState, {required bool left}) {
+  int nextPresetIndex = 0;
+  if (appState.presetCycleIndex != -1) {
+    nextPresetIndex = appState.presetCycleIndex;
+  }
+  if (left) {
+    nextPresetIndex--;
+  } else {
+    nextPresetIndex++;
+  }
+  if (nextPresetIndex < 0) {
+    nextPresetIndex = appState.presets.length - 1;
+  } else if (nextPresetIndex >= appState.presets.length) {
+    nextPresetIndex = 0;
+  }
+  return appState.presets[nextPresetIndex].sid;
+}
+
 class PresetCarousel extends StatefulWidget {
   final List<Preset> presets;
   final int itemsPerPage;
@@ -492,7 +510,7 @@ class PresetCarouselState extends State<PresetCarousel> {
       final bool hasLogo = !isLoading && logoBytes != null;
       final bool isLandscapeMode = isLandscape(context);
       final double lineHeight = isLandscapeMode ? 24 : 20;
-      final double graphicHeightOffset = 1.4 / appState.uiScale;
+      final double graphicHeightOffset = 1.4 / appState.textScale;
       final double graphicAreaHeight = lineHeight * graphicHeightOffset;
 
       return Padding(

@@ -84,12 +84,14 @@ class StorageData {
       case SaveDataType.welcomeSeen:
       case SaveDataType.debugMode:
       case SaveDataType.themeMode:
-      case SaveDataType.uiScale:
+      case SaveDataType.textScale:
       case SaveDataType.logLevel:
       case SaveDataType.linkTraceEnabled:
       case SaveDataType.monitoredDataServices:
       case SaveDataType.secondaryBaudRate:
       case SaveDataType.audioSampleRate:
+      case SaveDataType.mediaKeyBehavior:
+      case SaveDataType.interfaceScale:
         record[key] = value;
         break;
     }
@@ -134,12 +136,14 @@ class StorageData {
       case SaveDataType.welcomeSeen:
       case SaveDataType.debugMode:
       case SaveDataType.themeMode:
-      case SaveDataType.uiScale:
+      case SaveDataType.textScale:
       case SaveDataType.logLevel:
       case SaveDataType.linkTraceEnabled:
       case SaveDataType.monitoredDataServices:
       case SaveDataType.secondaryBaudRate:
       case SaveDataType.audioSampleRate:
+      case SaveDataType.mediaKeyBehavior:
+      case SaveDataType.interfaceScale:
         return record[key];
     }
   }
@@ -260,10 +264,12 @@ enum SaveDataType {
   welcomeSeen,
   debugMode,
   themeMode,
-  uiScale,
+  textScale,
   logLevel,
   linkTraceEnabled,
   monitoredDataServices,
   secondaryBaudRate,
-  audioSampleRate
+  audioSampleRate,
+  mediaKeyBehavior,
+  interfaceScale
 }

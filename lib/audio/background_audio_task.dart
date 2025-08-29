@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:orbit/app_state.dart';
 import 'package:orbit/device_layer.dart';
 import 'package:orbit/sxi_command_types.dart';
+import 'package:orbit/ui/preset.dart' show computeNextPresetSid;
 import 'package:orbit/sxi_commands.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:orbit/logging.dart';
@@ -47,23 +48,43 @@ class AudioServiceHandler extends BaseAudioHandler
   @override
   Future<void> skipToPrevious() async {
     logger.d('---> PREV |<');
-    deviceLayer.sendControlCommand(SXiSelectChannelCommand(
-        ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
-        nowPlaying!.channelNumber,
-        0xFF,
-        Overrides.all(),
-        AudioRoutingType.routeToAudio));
+    switch (appState.mediaKeyBehavior) {
+      case MediaKeyBehavior.channel:
+        deviceLayer.sendControlCommand(SXiSelectChannelCommand(
+            ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
+            nowPlaying!.channelNumber,
+            0xFF,
+            Overrides.all(),
+            AudioRoutingType.routeToAudio));
+        break;
+      case MediaKeyBehavior.presetCycle:
+        cyclePreset(left: true);
+        break;
+      case MediaKeyBehavior.track:
+        await rewind();
+        break;
+    }
   }
 
   @override
   Future<void> skipToNext() async {
     logger.d('---> NEXT >|');
-    deviceLayer.sendControlCommand(SXiSelectChannelCommand(
-        ChanSelectionType.tuneToNextHigherChannelNumberInCategory,
-        nowPlaying!.channelNumber,
-        0xFF,
-        Overrides.all(),
-        AudioRoutingType.routeToAudio));
+    switch (appState.mediaKeyBehavior) {
+      case MediaKeyBehavior.channel:
+        deviceLayer.sendControlCommand(SXiSelectChannelCommand(
+            ChanSelectionType.tuneToNextHigherChannelNumberInCategory,
+            nowPlaying!.channelNumber,
+            0xFF,
+            Overrides.all(),
+            AudioRoutingType.routeToAudio));
+        break;
+      case MediaKeyBehavior.presetCycle:
+        cyclePreset(left: false);
+        break;
+      case MediaKeyBehavior.track:
+        await fastForward();
+        break;
+    }
   }
 
   @override
@@ -98,6 +119,23 @@ class AudioServiceHandler extends BaseAudioHandler
       deviceLayer.sendControlCommand(SXiInstantReplayPlaybackControlCommand(
           PlaybackControlType.nextResume, 0, 0));
     }
+  }
+
+  void cyclePreset({required bool left}) {
+    final int? targetSid = computeNextPresetSid(appState, left: left);
+    if (targetSid == null) {
+      logger.t('No presets to cycle');
+      return;
+    }
+    logger.d('Cycling preset to SID=$targetSid');
+    final cfgCmd = SXiSelectChannelCommand(
+      ChanSelectionType.tuneUsingSID,
+      targetSid,
+      0xFF,
+      Overrides.all(),
+      AudioRoutingType.routeToAudio,
+    );
+    deviceLayer.sendControlCommand(cfgCmd);
   }
 
   void goToLive() {

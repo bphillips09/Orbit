@@ -236,6 +236,23 @@ class SXiLayer {
         logger.t("Content Successfully Buffered: $channel");
         break;
 
+      case SXiEventIndication eventIndication:
+        final code = EventCode.getByValue(eventIndication.eventCode);
+        final dataPairs = <String>[];
+        for (int i = 0; i + 1 < eventIndication.eventData.length; i += 2) {
+          final a = eventIndication.eventData[i];
+          final b = eventIndication.eventData[i + 1];
+          dataPairs.add(
+              'Event Data ${i.toString().padLeft(2)}:       ${a.toRadixString(16).padLeft(2, '0')} ${b.toRadixString(16).padLeft(2, '0')}');
+        }
+        final eventString = '''<----- EVENT INDICATION BEGIN ----->\n
+        TX ID: ${eventIndication.transactionID}
+        Event Code: ${eventIndication.eventCode} (${code.name})
+        ${dataPairs.join("\n        ")}
+        <----- EVENT INDICATION END ----->''';
+        logger.d(eventString);
+        break;
+
       case SXiCategoryInfoIndication categoryInfo:
         appState.addCategory(categoryInfo.catID, categoryInfo.catNameLong);
         logger.t(

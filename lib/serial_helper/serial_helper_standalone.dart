@@ -30,7 +30,7 @@ class StandaloneSerialHelper implements SerialHelper {
   @override
   Future<bool> openPort(Object? port, int baud) async {
     if (Platform.isAndroid) {
-      printLog('Opening port on Mobile');
+      logger.d('Opening port on Mobile');
 
       var selectedDevice = (port as String? ?? '');
       var allDevices = await UsbSerial.listDevices();
@@ -44,7 +44,7 @@ class StandaloneSerialHelper implements SerialHelper {
       }
 
       if (_androidDevice == null) {
-        printLog('No Android Device');
+        logger.d('No Android Device');
         return false;
       }
 
@@ -52,14 +52,14 @@ class StandaloneSerialHelper implements SerialHelper {
 
       bool openResult = await _androidPort!.open();
       if (!openResult) {
-        printLog('Cannot open the device');
+        logger.d('Cannot open the device');
         return false;
       }
 
       _androidPort!.setPortParameters(
           baud, UsbPort.DATABITS_8, UsbPort.STOPBITS_1, UsbPort.PARITY_NONE);
     } else {
-      printLog('Opening port on Desktop');
+      logger.d('Opening port on Desktop');
 
       _serialPort = SerialPort(port as String? ?? '');
 
@@ -117,14 +117,14 @@ class StandaloneSerialHelper implements SerialHelper {
   Future<int> writeData(Uint8List data) async {
     if (Platform.isAndroid) {
       if (_androidPort == null) {
-        printLog('Android port not available');
+        logger.d('Android port not available');
         return 1;
       }
       await _androidPort!.write(data);
       return 0;
     } else {
       if (!_serialPort.isOpen) {
-        printLog('Serial port not open');
+        logger.d('Serial port not open');
         return 1;
       }
       return _serialPort.write(data);
@@ -138,14 +138,14 @@ class StandaloneSerialHelper implements SerialHelper {
   ) async {
     if (Platform.isAndroid) {
       if (_androidPort == null) {
-        printLog('Android port not available');
+        logger.d('Android port not available');
         return;
       }
 
       try {
         _androidPort!.inputStream?.listen(onData);
       } catch (e) {
-        printLog("Port Error: $e");
+        logger.d("Port Error: $e");
         onEnd('Port Error: $e', false);
       }
     } else {
@@ -167,7 +167,7 @@ class StandaloneSerialHelper implements SerialHelper {
           cancelOnError: true,
         );
       } catch (e) {
-        printLog("Port Error: $e");
+        logger.d("Port Error: $e");
         onEnd('Port Error: $e', false);
       }
     }
@@ -176,15 +176,15 @@ class StandaloneSerialHelper implements SerialHelper {
   @override
   Future<bool> closePort() async {
     if (Platform.isAndroid) {
-      printLog('Closing port on Mobile');
+      logger.d('Closing port on Mobile');
       if (_androidPort == null) {
-        printLog('Android port not available');
+        logger.d('Android port not available');
         return false;
       }
 
       return await _androidPort!.close();
     } else {
-      printLog('Closing port on Desktop');
+      logger.d('Closing port on Desktop');
       if (!_serialPort.isOpen) {
         return true;
       }
@@ -199,10 +199,6 @@ class StandaloneSerialHelper implements SerialHelper {
 
       return _serialPort.close();
     }
-  }
-
-  void printLog(Object str) {
-    logger.d(str.toString());
   }
 
   @override

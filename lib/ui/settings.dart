@@ -165,6 +165,7 @@ class SettingsPage extends StatelessWidget {
                     appState.updateSliderSnapping(value);
                   },
                 ),
+                _buildMediaKeyBehaviorSelector(context, appState),
               ],
             ),
             const SizedBox(height: sectionSpacing),
@@ -176,6 +177,8 @@ class SettingsPage extends StatelessWidget {
                 _buildThemeSelector(context, appState),
                 const SizedBox(height: 8),
                 _buildScaleSelector(context, appState),
+                const SizedBox(height: 8),
+                _buildDesignHeightSelector(context, appState),
               ],
             ),
             const SizedBox(height: sectionSpacing),
@@ -873,7 +876,7 @@ class SettingsPage extends StatelessWidget {
           trailing: Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: theme.colorScheme.primary,
+            activeThumbColor: theme.colorScheme.primary,
           ),
         ),
       ),
@@ -1000,6 +1003,117 @@ class SettingsPage extends StatelessWidget {
               .toList(),
         ),
       ),
+    );
+  }
+
+  Widget _buildMediaKeyBehaviorSelector(
+      BuildContext context, AppState appState) {
+    final theme = Theme.of(context);
+
+    const Map<MediaKeyBehavior, String> labels = {
+      MediaKeyBehavior.channel: 'Channel Up/Down (default)',
+      MediaKeyBehavior.presetCycle: 'Presets Left/Right',
+      MediaKeyBehavior.track: 'Track Back/Forward',
+    };
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (!isLandscape(context)) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.settings_remote,
+                        color: theme.colorScheme.primary),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Media Key Behavior',
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Choose what the system rewind/forward keys control',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurface,
+                            ),
+                            softWrap: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonHideUnderline(
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: DropdownButton<MediaKeyBehavior>(
+                      isExpanded: true,
+                      value: appState.mediaKeyBehavior,
+                      onChanged: (value) {
+                        if (value == null) return;
+                        appState.updateMediaKeyBehavior(value);
+                      },
+                      items: MediaKeyBehavior.values
+                          .map(
+                            (v) => DropdownMenuItem<MediaKeyBehavior>(
+                              value: v,
+                              child: Text(labels[v] ?? v.name),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListTile(
+          leading:
+              Icon(Icons.settings_remote, color: theme.colorScheme.primary),
+          title: Text(
+            'Media Key Behavior',
+            style: theme.textTheme.bodyLarge?.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          subtitle: Text(
+            'Choose what the system rewind/forward keys control',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+          trailing: DropdownButtonHideUnderline(
+            child: DropdownButton<MediaKeyBehavior>(
+              value: appState.mediaKeyBehavior,
+              onChanged: (value) {
+                if (value == null) return;
+                appState.updateMediaKeyBehavior(value);
+              },
+              items: MediaKeyBehavior.values
+                  .map(
+                    (v) => DropdownMenuItem<MediaKeyBehavior>(
+                      value: v,
+                      child: Text(labels[v] ?? v.name),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1884,7 +1998,7 @@ class SettingsPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'UI Scale',
+            'Text Scale',
             style: theme.textTheme.bodyMedium?.copyWith(
               fontWeight: FontWeight.w500,
               color: theme.colorScheme.onSurface,
@@ -1895,18 +2009,18 @@ class SettingsPage extends StatelessWidget {
             children: [
               Expanded(
                 child: Slider(
-                  value: appState.uiScale,
+                  value: appState.textScale,
                   min: 0.7,
                   max: 1.8,
                   divisions: 11,
-                  label: '${(appState.uiScale * 100).round()}%',
+                  label: '${(appState.textScale * 100).round()}%',
                   onChanged: (value) => appState.updateUiScale(value),
                 ),
               ),
               SizedBox(
                 width: 56,
                 child: Text(
-                  '${(appState.uiScale * 100).round()}%',
+                  '${(appState.textScale * 100).round()}%',
                   textAlign: TextAlign.end,
                   style: theme.textTheme.bodyMedium,
                 ),
@@ -1932,10 +2046,107 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
+  Widget _buildDesignHeightSelector(BuildContext context, AppState appState) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'UI Scale',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w500,
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Slider(
+                  value: appState.uiScale,
+                  min: 360,
+                  max: 1440,
+                  divisions: 27,
+                  label: appState.uiScale.round().toString(),
+                  onChanged: (value) => appState.updateDesignHeight(value),
+                ),
+              ),
+              SizedBox(
+                width: 64,
+                child: Text(
+                  appState.uiScale.round().toString(),
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                _buildDesignHeightPresetButton(context, 'Phone', 640, appState),
+                _buildDesignHeightPresetButton(
+                    context, 'Default', 720, appState),
+                _buildDesignHeightPresetButton(
+                    context, 'Tablet', 900, appState),
+                _buildDesignHeightPresetButton(
+                    context, 'Large', 1080, appState),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesignHeightPresetButton(
+      BuildContext context, String label, double value, AppState appState) {
+    final theme = Theme.of(context);
+    final bool selected = (appState.uiScale - value).abs() < 1.0;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => appState.updateDesignHeight(value),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? theme.colorScheme.primaryContainer
+                : theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: selected
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outline.withValues(alpha: 0.2),
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: selected
+                  ? theme.colorScheme.onPrimaryContainer
+                  : theme.colorScheme.onSurface,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildScalePresetButton(
       BuildContext context, String label, double value, AppState appState) {
     final theme = Theme.of(context);
-    final bool selected = (appState.uiScale - value).abs() < 0.01;
+    final bool selected = (appState.textScale - value).abs() < 0.01;
     return Material(
       color: Colors.transparent,
       child: InkWell(
