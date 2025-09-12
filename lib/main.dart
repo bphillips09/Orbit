@@ -232,7 +232,7 @@ class MainPageState extends State<MainPage> {
       logger.i('AudioSession configured success');
 
       // Show first-time welcome
-      if (appState.welcomeSeen) {
+      if (!appState.welcomeSeen) {
         try {
           await Future<void>.delayed(const Duration(milliseconds: 50));
           if (mounted) {
