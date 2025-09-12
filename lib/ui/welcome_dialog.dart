@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:provider/provider.dart';
+import 'package:orbit/app_state.dart';
 
 class WelcomeDialog extends StatelessWidget {
   final VoidCallback onGetStarted;
@@ -21,6 +23,7 @@ class WelcomeDialog extends StatelessWidget {
     final theme = Theme.of(context);
     final onSurfaceColor = theme.colorScheme.onSurface;
     final linkColor = theme.colorScheme.primary;
+    final appState = Provider.of<AppState>(context);
 
     return AlertDialog(
       title: Row(
@@ -44,6 +47,24 @@ class WelcomeDialog extends StatelessWidget {
             Text(
               'An SXV300 tuner is required.',
               style: TextStyle(fontSize: 16, color: onSurfaceColor),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Checkbox(
+                  value: !appState.analyticsDisabled,
+                  onChanged: (v) {
+                    if (v == null) return;
+                    appState.updateAnalyticsDisabled(!v);
+                  },
+                ),
+                const Expanded(
+                  child: Text(
+                    'Send anonymous usage data',
+                    softWrap: true,
+                  ),
+                ),
+              ],
             ),
             if (kIsWeb) ...[
               const SizedBox(height: 24),

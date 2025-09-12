@@ -92,6 +92,7 @@ class StorageData {
       case SaveDataType.audioSampleRate:
       case SaveDataType.mediaKeyBehavior:
       case SaveDataType.interfaceScale:
+      case SaveDataType.analyticsDisabled:
       case SaveDataType.detectAudioInterruptions:
         record[key] = value;
         break;
@@ -145,6 +146,7 @@ class StorageData {
       case SaveDataType.audioSampleRate:
       case SaveDataType.mediaKeyBehavior:
       case SaveDataType.interfaceScale:
+      case SaveDataType.analyticsDisabled:
       case SaveDataType.detectAudioInterruptions:
         return record[key];
     }
@@ -274,5 +276,6 @@ enum SaveDataType {
   audioSampleRate,
   mediaKeyBehavior,
   interfaceScale,
+  analyticsDisabled,
   detectAudioInterruptions
 }

@@ -5,12 +5,17 @@ class Telemetry {
   Telemetry._();
 
   static bool _initialized = false;
+  static bool _disabled = false;
   static final Map<String, dynamic> _globalProps = <String, dynamic>{};
 
   static Future<void> initialize(
     String appKey, {
     bool debug = false,
   }) async {
+    if (_disabled) {
+      _initialized = false;
+      return;
+    }
     try {
       await Aptabase.init(
         appKey,
@@ -26,7 +31,7 @@ class Telemetry {
     String eventName, [
     Map<String, dynamic>? props,
   ]) async {
-    if (!_initialized) return;
+    if (!_initialized || _disabled) return;
     try {
       final Map<String, dynamic> mergedProps = {
         ..._globalProps,
@@ -56,5 +61,9 @@ class Telemetry {
 
   static void clearProperties() {
     _globalProps.clear();
+  }
+
+  static void setDisabled(bool disabled) {
+    _disabled = disabled;
   }
 }

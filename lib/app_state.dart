@@ -38,6 +38,7 @@ class AppState extends ChangeNotifier {
   bool showOnAirFavoritesPrompt = true;
   bool welcomeSeen = false;
   bool debugMode = false;
+  bool analyticsDisabled = false;
   // Android-only: preferred audio output route
   String androidAudioOutputRoute = 'Speaker';
   bool detectAudioInterruptions = true;
@@ -273,6 +274,13 @@ class AppState extends ChangeNotifier {
       SaveDataType.debugMode,
       defaultValue: kDebugMode,
     );
+    analyticsDisabled = await storageData.load(
+      SaveDataType.analyticsDisabled,
+      defaultValue: false,
+    );
+    try {
+      Telemetry.setDisabled(analyticsDisabled);
+    } catch (_) {}
 
     // First-time welcome flag
     welcomeSeen = await storageData.load(
@@ -488,6 +496,15 @@ class AppState extends ChangeNotifier {
   void updateDebugMode(bool enabled) {
     debugMode = enabled;
     storageData.save(SaveDataType.debugMode, debugMode);
+    notifyListeners();
+  }
+
+  void updateAnalyticsDisabled(bool disabled) {
+    analyticsDisabled = disabled;
+    storageData.save(SaveDataType.analyticsDisabled, disabled);
+    try {
+      Telemetry.setDisabled(disabled);
+    } catch (_) {}
     notifyListeners();
   }
 

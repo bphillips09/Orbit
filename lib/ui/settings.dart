@@ -320,6 +320,16 @@ class SettingsPage extends StatelessWidget {
               'Data',
               Icons.storage,
               [
+                _buildSwitchTile(
+                  context,
+                  'Disable Analytics',
+                  'Stops sending anonymous usage events',
+                  Icons.insights,
+                  value: appState.analyticsDisabled,
+                  onChanged: (value) {
+                    appState.updateAnalyticsDisabled(value);
+                  },
+                ),
                 _buildSettingTile(
                   context,
                   'Open Data Directory',
