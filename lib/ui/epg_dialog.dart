@@ -202,11 +202,6 @@ class _EpgDialogState extends State<EpgDialog> {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.refresh),
-                tooltip: 'Refresh',
-                onPressed: _refreshDialog,
-              ),
-              IconButton(
                 icon: const Icon(Icons.close),
                 tooltip: 'Close',
                 onPressed: () => Navigator.pop(context, -1),

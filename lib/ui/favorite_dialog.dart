@@ -13,6 +13,10 @@ class FavoriteDialogHelper {
     required AppState appState,
     required DeviceLayer deviceLayer,
   }) async {
+    if (appState.isScanActive) {
+      return;
+    }
+
     // Snapshot all values up-front so the dialog stays static even if
     // now playing metadata changes while it's open.
     final int songId = appState.nowPlaying.songId;

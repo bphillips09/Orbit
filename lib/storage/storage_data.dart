@@ -3,9 +3,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:orbit/data/handlers/channel_graphics_handler.dart';
 import 'package:sembast/sembast_io.dart';
 import 'package:sembast_web/sembast_web_interop.dart';
-import 'package:orbit/data/data_handlers.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:orbit/ui/preset.dart';
@@ -92,6 +92,7 @@ class StorageData {
       case SaveDataType.audioSampleRate:
       case SaveDataType.mediaKeyBehavior:
       case SaveDataType.interfaceScale:
+      case SaveDataType.detectAudioInterruptions:
         record[key] = value;
         break;
     }
@@ -144,6 +145,7 @@ class StorageData {
       case SaveDataType.audioSampleRate:
       case SaveDataType.mediaKeyBehavior:
       case SaveDataType.interfaceScale:
+      case SaveDataType.detectAudioInterruptions:
         return record[key];
     }
   }
@@ -271,5 +273,6 @@ enum SaveDataType {
   secondaryBaudRate,
   audioSampleRate,
   mediaKeyBehavior,
-  interfaceScale
+  interfaceScale,
+  detectAudioInterruptions
 }

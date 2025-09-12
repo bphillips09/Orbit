@@ -1,12 +1,13 @@
-// FrameTracer, traces the frames sent and received by the device
 import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:orbit/data/wxtab_parser.dart';
 import 'package:orbit/logging.dart';
 
+// FrameTracer, traces the frames sent and received by the device
 class FrameTracer {
   FrameTracer._internal();
   static final FrameTracer instance = FrameTracer._internal();
@@ -122,5 +123,44 @@ class FrameTracer {
       await _maybeRotate();
       _sink!.write(_formatFrame(frame, 'TX'));
     } catch (_) {}
+  }
+}
+
+// WxTabDebugTools, parses WxTab files from hex strings
+class WxTabDebugTools {
+  WxTabDebugTools._internal();
+  static final WxTabDebugTools instance = WxTabDebugTools._internal();
+
+  List<int> _hexToBytes(String s) {
+    final cleaned = s.replaceAll(RegExp(r'[^0-9A-Fa-f]'), '');
+    final bytes = <int>[];
+    for (int i = 0; i + 1 < cleaned.length; i += 2) {
+      bytes.add(int.parse(cleaned.substring(i, i + 2), radix: 16));
+    }
+    return bytes;
+  }
+
+  Future<void> parseWxTabFromHexFile(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) {
+        logger.w('WxTabDebug: File not found: $path');
+        return;
+      }
+      final txt = await file.readAsString();
+      final bytes = _hexToBytes(txt);
+      logger.i('WxTabDebug: Read ${bytes.length} bytes from $path');
+      final parsed = WxTabParser.parse(bytes,
+          fileName: path.split(Platform.pathSeparator).last);
+      logger.i(
+          'WxTabDebug: Parsed WxTab dbVersion=${parsed.dbVersion} fileVersion=${parsed.fileVersion} versionBits=${parsed.fileVersionBits} states=${parsed.states.length}');
+      if (parsed.states.isNotEmpty) {
+        final s = parsed.states.first;
+        logger.i(
+            'WxTabDebug: First state id=${s.id} entries=${s.entries.length}');
+      }
+    } catch (e) {
+      logger.w('WxTabDebug: Parse failed: $e');
+    }
   }
 }

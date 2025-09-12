@@ -14,7 +14,7 @@ class AppLogger {
   Level _currentLevel = kDebugMode ? Level.debug : Level.info;
   IOSink? _fileSink;
   File? _logFile;
-  static const int _maxBytes = 1024 * 1024; // 1 MiB
+  static const int _maxBytes = 1024 * 1024 * 10; // 10 MiB
   static const int _maxRotations = 3;
   LogOutput? _output;
   LogPrinter? _printer;
@@ -75,8 +75,8 @@ class AppLogger {
       await _maybeRotateLogs();
       _fileSink = _logFile!.openWrite(mode: FileMode.append);
 
-      // Rebuild outputs to include file sink
-      final outputs = <LogOutput>[ConsoleOutput(), _FileSinkOutput(_fileSink!)];
+      // Rebuild outputs to include file sink (writer handles rotation itself)
+      final outputs = <LogOutput>[ConsoleOutput(), _FileSinkOutput()];
       _output = MultiOutput(outputs);
       _logger = Logger(
         level: _currentLevel,
@@ -86,6 +86,35 @@ class AppLogger {
       );
     } catch (_) {
       // Ignore file init errors, console logging still works
+    }
+  }
+
+  // Safely write lines to the log file with rotation enforcement
+  Future<void> _writeLinesToFile(List<String> lines) async {
+    if (kIsWeb || kIsWasm) return;
+    try {
+      if (_logFile == null || _fileSink == null) {
+        await ensureFileOutputReady();
+      }
+      if (_logFile == null) return;
+
+      // Rotate if current file is at/over limit
+      try {
+        final int size = await _logFile!.length();
+        if (size >= _maxBytes) {
+          await _maybeRotateLogs();
+          // Reopen sink for the new current file
+          _fileSink = _logFile!.openWrite(mode: FileMode.append);
+        }
+      } catch (_) {}
+
+      final IOSink? sink = _fileSink;
+      if (sink == null) return;
+      for (final line in lines) {
+        sink.writeln(line);
+      }
+    } catch (_) {
+      // Swallow write errors to avoid crashing the app due to logging
     }
   }
 
@@ -208,14 +237,9 @@ class AppLogger {
 
 // File sink output for multi-output
 class _FileSinkOutput extends LogOutput {
-  final IOSink sink;
-  _FileSinkOutput(this.sink);
-
   @override
   void output(OutputEvent event) {
-    for (var line in event.lines) {
-      sink.writeln(line);
-    }
+    AppLogger.instance._writeLinesToFile(event.lines);
   }
 }
 

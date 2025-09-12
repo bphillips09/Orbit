@@ -366,7 +366,7 @@ class SXiMonitorSeekCommand extends SXiPayload {
 
   @override
   List<int> getParameters() {
-    // Cap maximum counts to match radio behavior (60 values, 32 report tags)
+    // Cap maximum counts (60 values, 32 report tags)
     const int maxMonitorValues = 60;
     const int maxReportTmis = 32;
     final List<int> valuesToSend = monitorValues.length > maxMonitorValues
@@ -509,25 +509,25 @@ class SXiPackageCommand extends SXiPayload {
   }
 }
 
-class SXiDeviceIPAuthenticationCommand extends SXiPayload {
-  bool enabled;
+class SXiDeviceAuthenticationCommand extends SXiPayload {
+  // No parameters
 
-  SXiDeviceIPAuthenticationCommand(this.enabled) : super(0x00, 0xF0, 0);
+  SXiDeviceAuthenticationCommand() : super(0x00, 0xF1, 0);
 
   @override
   List<int> getParameters() {
-    return [enabled ? 1 : 0];
+    return [];
   }
 }
 
-class SXiDeviceAuthenticationCommand extends SXiPayload {
-  bool enabled;
+class SXiDeviceIPAuthenticationCommand extends SXiPayload {
+  List<int> challenge;
 
-  SXiDeviceAuthenticationCommand(this.enabled) : super(0x00, 0xF1, 0);
+  SXiDeviceIPAuthenticationCommand(this.challenge) : super(0x00, 0xF0, 0);
 
   @override
   List<int> getParameters() {
-    return [enabled ? 1 : 0];
+    return [...challenge];
   }
 }
 
@@ -537,5 +537,101 @@ class SXiPingCommand extends SXiPayload {
   @override
   List<int> getParameters() {
     return [];
+  }
+}
+
+class SXiDebugModeCommand extends SXiPayload {
+  bool enabled;
+
+  SXiDebugModeCommand(this.enabled) : super(0x0F, 0x09, 0);
+
+  @override
+  List<int> getParameters() {
+    return [enabled ? 1 : 0];
+  }
+}
+
+class SXiDebugMonitorCommand extends SXiPayload {
+  final int bank;
+  final int widthType;
+  final int address;
+  final int length;
+  final int flags;
+  final int extra;
+
+  SXiDebugMonitorCommand({
+    required this.bank,
+    required this.widthType,
+    required this.address,
+    required this.length,
+    this.flags = 0,
+    this.extra = 0,
+  }) : super(0x0F, 0x04, 0);
+
+  SXiDebugMonitorCommand.readByte(int address, {int bank = 0})
+      : this(
+          bank: bank,
+          widthType: 0,
+          address: address,
+          length: 1,
+        );
+
+  @override
+  List<int> getParameters() {
+    return [
+      bank & 0xFF,
+      widthType & 0xFF,
+      (address >> 24) & 0xFF,
+      (address >> 16) & 0xFF,
+      (address >> 8) & 0xFF,
+      address & 0xFF,
+      (length >> 8) & 0xFF,
+      length & 0xFF,
+      flags & 0xFF,
+      (extra >> 8) & 0xFF,
+      extra & 0xFF,
+    ];
+  }
+}
+
+class SXiDebugWriteBytesCommand extends SXiPayload {
+  final int bank;
+  final int address;
+  final List<int> data;
+
+  static const int _widthType = 0;
+
+  SXiDebugWriteBytesCommand({
+    required this.bank,
+    required this.address,
+    required List<int> data,
+  })  : data = List<int>.from(data.map((b) => b & 0xFF)),
+        super(0x0F, 0x03, 0);
+
+  @override
+  List<int> getParameters() {
+    final int length = data.length & 0xFFFF;
+    return [
+      bank & 0xFF,
+      _widthType & 0xFF,
+      (address >> 24) & 0xFF,
+      (address >> 16) & 0xFF,
+      (address >> 8) & 0xFF,
+      address & 0xFF,
+      (length >> 8) & 0xFF,
+      length & 0xFF,
+      _widthType & 0xFF,
+      ...data,
+    ];
+  }
+}
+
+class SXiDebugUnmonitorCommand extends SXiPayload {
+  SXiDebugUnmonitorCommand() : super(0x0F, 0x05, 0);
+
+  @override
+  List<int> getParameters() {
+    // Most debug control commands encode an extra zero byte
+    return [0x00];
   }
 }

@@ -1,137 +1,15 @@
-import 'package:orbit/helpers.dart';
-import 'package:orbit/sxi_indication_types.dart';
+// Channel Graphics Handler
 import 'package:orbit/data/access_unit.dart';
 import 'package:orbit/data/bit_buffer.dart';
-import 'package:orbit/sxi_layer.dart';
+import 'package:orbit/data/data_handler.dart';
+import 'package:orbit/helpers.dart';
 import 'package:orbit/logging.dart';
+import 'package:orbit/sxi_indication_types.dart';
+import 'package:orbit/sxi_layer.dart';
 
-// Data Stream Identifier (DSI) Handler
-abstract class DSIHandler {
-  final DataServiceIdentifier dsi;
-  final SXiLayer sxiLayer;
-
-  DSIHandler(this.dsi, this.sxiLayer);
-
-  void onAccessUnitComplete(AccessUnit unit);
-}
-
-// Album Art Handler
-class AlbumArtHandler extends DSIHandler {
-  final Map<int, Map<int, AccessUnitGroup>> auGroups = {};
-
-  AlbumArtHandler(SXiLayer sxiLayer)
-      : super(DataServiceIdentifier.albumArt, sxiLayer);
-
-  @override
-  void onAccessUnitComplete(AccessUnit unit) {
-    BitBuffer bitBuffer = BitBuffer(unit.getHeaderAndData());
-    int pvn = bitBuffer.readBits(4);
-    int carid = bitBuffer.readBits(3);
-
-    if (pvn == 1) {
-      if (carid == 0 || carid == 1) {
-        try {
-          handleImageData(bitBuffer);
-        } catch (e) {
-          logger.w("AlbumArtHandler: Error processing image data - $e");
-        }
-      } else if (carid == 2) {
-        logger.d('AlbumArtHandler: Default assignment data received.');
-      } else {
-        logger.w("AlbumArtHandler: Unhandled Carousel ID: $carid");
-      }
-    } else {
-      logger.w("AlbumArtHandler: Unhandled PVN: $pvn");
-    }
-  }
-
-  void handleImageData(BitBuffer buffer) {
-    int accessUnitTotal = 0;
-    int accessUnitCount = 0;
-
-    int programType = buffer.readBits(4);
-    int imageType = buffer.readBits(3);
-
-    if (imageType == 0) {
-      int sid;
-      int programId;
-
-      if (programType == 0) {
-        sid = buffer.readBits(10); // SID
-        imageType = buffer.readBits(32); // ARG
-        programId = imageType & 0x7FFFFFFF; // Mask out sign bit
-      } else {
-        if (programType != 4) {
-          logger.w('AlbumArtHandler: Unsupported Program Type: $programType');
-          return;
-        }
-        sid = buffer.readBits(10); // SID
-        programId = buffer.readBits(8); // ARG
-      }
-
-      if (programType == 4) {
-        programId |= sid << 16; // Combine SID and ARG
-      }
-
-      bool hasCaption = buffer.readBits(1) != 0;
-      if (hasCaption) {
-        int captionCharCount = 0;
-        while (captionCharCount < 5) {
-          int captionChar = buffer.readBits(5);
-          if (captionChar == 0) break;
-          captionCharCount++;
-        }
-      }
-
-      bool hasExtendedData = buffer.readBits(1) != 0;
-      if (hasExtendedData) {
-        int extCnt = buffer.readBits(8);
-        for (int i = 0; i < extCnt + 1; i++) {
-          buffer.readBits(8);
-        }
-      }
-
-      bool isAuGroup = buffer.readBits(1) != 0;
-      if (isAuGroup) {
-        int fieldSize = buffer.readBits(4);
-        accessUnitTotal = buffer.readBits(fieldSize + 1);
-        accessUnitCount = buffer.readBits(fieldSize + 1);
-      }
-
-      List<int> auData = buffer.remainingData;
-      buffer.align(); // We probably need to always align to the byte boundary
-
-      auGroups[sid] ??= {};
-      var sidGroups = auGroups[sid]!;
-      var auGroup = sidGroups[programId] ??= AccessUnitGroup(
-          sid: sid, pid: programId, totalAUs: accessUnitTotal + 1);
-
-      bool complete = auGroup.addUnit(accessUnitCount, auData);
-
-      if (complete) {
-        List<int> assembledImage = auGroup.assemble();
-        handleCompleteImage(sid, programId, assembledImage);
-
-        sidGroups.remove(programId);
-        if (sidGroups.isEmpty) {
-          auGroups.remove(sid);
-        }
-      }
-    } else {
-      logger.w('AlbumArtHandler: Unsupported Image Type: $imageType');
-    }
-  }
-
-  void handleCompleteImage(int sid, int programId, List<int> image) {
-    logger.t('AlbumArtHandler: Complete Image: $sid - $programId');
-    sxiLayer.setProgramImage(sid, programId, image);
-  }
-}
-
-// Channel Graphics Handler
 class ChannelGraphicsHandler extends DSIHandler {
   ChannelGraphicsHandler(SXiLayer sxiLayer)
-      : super(DataServiceIdentifier.albumArt, sxiLayer);
+      : super(DataServiceIdentifier.channelGraphicsUpdates, sxiLayer);
 
   @override
   void onAccessUnitComplete(AccessUnit unit) {
@@ -199,11 +77,11 @@ class ChannelGraphicsHandler extends DSIHandler {
 
   List<ServiceGraphicsReference> parseServiceReferenceData(
       BitBuffer bitBuffer, int mti) {
-    // Base Layer Sequence?
+    // Base Layer Sequence
     bitBuffer.skipBits(8);
     int overlayLayerSequence = bitBuffer.readBits(8);
     int baseLayerPowerUpIndication = bitBuffer.readBits(8);
-    // Overlay Power Up Indication?
+    // Overlay Power Up Indication
     bitBuffer.skipBits(8);
 
     List<ServiceGraphicsReference> table = [];
@@ -367,129 +245,6 @@ class ChannelGraphicsHandler extends DSIHandler {
       secondaryImageDataLen: secondaryImageDataLen,
       imageData: imageData,
     );
-  }
-}
-
-// Program Guide Handler
-class ProgramGuideHandler extends DSIHandler {
-  ProgramGuideHandler(SXiLayer sxiLayer)
-      : super(DataServiceIdentifier.electronicProgramGuide, sxiLayer);
-
-  @override
-  void onAccessUnitComplete(AccessUnit unit) {
-    BitBuffer bitBuffer = BitBuffer(unit.getHeaderAndData());
-    int version = bitBuffer.readBits(4);
-    int messageType = bitBuffer.readBits(3);
-
-    if (version == 1) {
-      switch (messageType) {
-        case 0x0:
-        case 0x1:
-          logger.d('ProgramGuideHandler: Schedule Message');
-          break;
-        case 0x2:
-          logger.d('ProgramGuideHandler: Program Announcement Message');
-          break;
-        case 0x3:
-          logger.d('ProgramGuideHandler: Table Affinity Message');
-          break;
-        case 0x4:
-          logger.d('ProgramGuideHandler: Profile Configuration Message');
-          break;
-        case 0x5:
-          logger.d('ProgramGuideHandler: Segment Versioning Message');
-          break;
-      }
-
-      logger.t(
-          'ProgramGuideHandler remaining data len: ${bitBuffer.viewRemainingData.length}');
-    } else {
-      logger.w("ProgramGuideHandler Invalid EPG Version: $version");
-    }
-  }
-}
-
-// Tabular Weather Handler
-class TabularWeatherHandler extends DSIHandler {
-  TabularWeatherHandler(SXiLayer sxiLayer)
-      : super(DataServiceIdentifier.sxmWeatherTabular, sxiLayer);
-
-  @override
-  void onAccessUnitComplete(AccessUnit unit) {
-    BitBuffer bitBuffer = BitBuffer(unit.getHeaderAndData());
-    int pvn = bitBuffer.readBits(4);
-    int carid = bitBuffer.readBits(3);
-
-    if (pvn == 1) {
-      logger.t('TabularWeatherHandler: messageType: $carid');
-      logger.t(
-          'TabularWeatherHandler: remaining data len: ${bitBuffer.viewRemainingData.length}');
-
-      // Map remaining data to hex
-      String remainingDataHex = bitBuffer.viewRemainingData
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join(' ');
-      logger.t('TabularWeatherHandler: Remaining data: $remainingDataHex');
-
-      // Add detailed debugging for each message type
-      switch (carid) {
-        case 0:
-          // Forecast Weather Report
-          logger.d(
-              'TabularWeatherHandler: Processing message type 0 (Forecast Weather Report)');
-          break;
-        case 1:
-          // Ski Condition Report
-          logger.d(
-              'TabularWeatherHandler: Processing message type 1 (Ski Condition Report)');
-          break;
-        case 2:
-          // Reliable File Delivery (Weather Data)
-          logger.d(
-              'TabularWeatherHandler: Processing message type 2 (Reliable File Delivery (Weather Data))');
-          break;
-        case 3:
-          // Metadata update for RFD
-          logger.d(
-              'TabularWeatherHandler: Processing message type 3 (Metadata update for RFD)');
-          break;
-        default:
-          logger.w('TabularWeatherHandler: Unknown message type: $carid');
-      }
-    } else {
-      logger.w("TabularWeatherHandler: Invalid Version: $pvn");
-    }
-  }
-}
-
-// IVSM Handler
-class IVSMHandler extends DSIHandler {
-  IVSMHandler(SXiLayer sxiLayer) : super(DataServiceIdentifier.ivsm, sxiLayer);
-
-  @override
-  void onAccessUnitComplete(AccessUnit unit) {
-    BitBuffer bitBuffer = BitBuffer(unit.getHeaderAndData());
-    int pvn = bitBuffer.readBits(4);
-    int carid = bitBuffer.readBits(3);
-
-    if (pvn == 1) {
-      switch (carid) {
-        case 0:
-          logger.d('IVSMHandler: Radio Assignment Carousel');
-          break;
-        case 1:
-          logger.d('IVSMHandler: Recipe Carousel');
-          break;
-        case 2:
-          logger.d('IVSMHandler: Audio Clip Carousel');
-          break;
-        case 3:
-          logger.d('IVSMHandler: Configuration Carousel');
-          break;
-      }
-    } else {
-      logger.w("IVSMHandler: Invalid Version: $pvn");
-    }
   }
 }
 

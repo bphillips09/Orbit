@@ -41,10 +41,6 @@ class BitBuffer {
   int readBits(int len) {
     if (_error) return 0;
 
-    if (len > 32) {
-      throw ArgumentError('Cannot read more than 32 bits at a time.');
-    }
-
     _ensureBits(len);
 
     if (_error) return 0;
@@ -67,10 +63,6 @@ class BitBuffer {
 
   void skipBits(int len) {
     if (_error) return;
-
-    if (len > 32) {
-      throw ArgumentError('Cannot skip more than 32 bits at a time.');
-    }
 
     _ensureBits(len);
 
@@ -102,4 +94,52 @@ class BitBuffer {
 
   // True if an error occurred during reading or replenishment
   bool get hasError => _error;
+
+  // Reads all remaining bits from the current bit position and returns them
+  // as a newly packed byte list (zero-padded if necessary)
+  List<int> readRemainingBitsAsBytes() {
+    if (_error) return [];
+    // Compute total remaining bits: currently buffered bits + full bytes left
+    int totalBits = _validBits + (buffer.length - _position) * 8;
+    if (totalBits <= 0) {
+      // Consume remaining bytes like remainingData for consistency
+      _position = buffer.length;
+      _validBits = 0;
+      _seed = 0;
+      return <int>[];
+    }
+    final List<int> out = <int>[];
+    while (totalBits >= 8) {
+      out.add(readBits(8));
+      if (_error) return out;
+      totalBits -= 8;
+    }
+    if (totalBits > 0) {
+      // Read the remaining high-order bits and pad the low bits with zeros
+      final int rem = readBits(totalBits);
+      if (!_error) {
+        final int padded = (rem & ((1 << totalBits) - 1)) << (8 - totalBits);
+        out.add(padded & 0xFF);
+      }
+    }
+    return out;
+  }
+
+  // Peek bits without advancing the internal cursor
+  int peekBits(int len) {
+    if (_error) return 0;
+    final int savedPos = _position;
+    final int savedValid = _validBits;
+    final int savedSeed = _seed;
+    final bool savedErr = _error;
+    final int result = readBits(len);
+    _position = savedPos;
+    _validBits = savedValid;
+    _seed = savedSeed;
+    _error = savedErr;
+    return result;
+  }
+
+  int get debugBytePos => _position;
+  int get debugValidBits => _validBits;
 }

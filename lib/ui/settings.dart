@@ -5,10 +5,11 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:open_file/open_file.dart';
+import 'package:orbit/data/handlers/channel_graphics_handler.dart';
+import 'package:orbit/ui/epg_schedule_view.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:orbit/app_state.dart';
-import 'package:orbit/data/data_handlers.dart';
 import 'package:orbit/helpers.dart';
 import 'package:orbit/main.dart';
 import 'package:orbit/storage/storage_data.dart';
@@ -291,6 +292,7 @@ class SettingsPage extends StatelessWidget {
                   ),
                   if (!kIsWeb && !kIsWasm && Platform.isAndroid) ...[
                     _buildAudioOutputSection(context),
+                    _buildAndroidAudioInterruptionToggle(context),
                   ],
                   _buildSettingTile(
                     context,
@@ -486,6 +488,14 @@ class SettingsPage extends StatelessWidget {
                                   .stopMonitorForAllServices,
                               DataServiceIdentifier.none));
                     },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'EPG Schedule',
+                    'Show the EPG schedule',
+                    Icons.schedule,
+                    onTap: () =>
+                        EpgScheduleDialog.show(context, mainPage.sxiLayer),
                   ),
                 ],
               ],
@@ -949,6 +959,35 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
+  Widget _buildAndroidAudioInterruptionToggle(BuildContext context) {
+    final appState = Provider.of<AppState>(context);
+    return _buildSwitchTile(
+      context,
+      'Detect Audio Interruptions',
+      'Android only. Pause input during Assistant/calls and resume after.',
+      Icons.hearing,
+      value: appState.detectAudioInterruptions,
+      onChanged: (v) async {
+        appState.updateDetectAudioInterruptions(v);
+        // If audio is currently enabled, restart capture to apply behavior
+        if (appState.enableAudio) {
+          final main = mainPage;
+          try {
+            main.audioController.stopAudioThread();
+          } catch (_) {}
+          try {
+            await main.audioController.startAudioThread(
+              selectedDevice: null,
+              androidAudioOutputRoute: appState.androidAudioOutputRoute,
+              detectAudioInterruptions: v,
+              preferredSampleRate: appState.audioSampleRate,
+            );
+          } catch (_) {}
+        }
+      },
+    );
+  }
+
   Widget _buildSecondaryBaudSelector(BuildContext context, AppState appState) {
     final theme = Theme.of(context);
     // Allowed baud rates matching device codes 0..4
@@ -1164,6 +1203,7 @@ class SettingsPage extends StatelessWidget {
                 await main.audioController.startAudioThread(
                   selectedDevice: null,
                   androidAudioOutputRoute: appState.androidAudioOutputRoute,
+                  detectAudioInterruptions: appState.detectAudioInterruptions,
                   preferredSampleRate: value,
                 );
                 if (context.mounted) {
@@ -1879,6 +1919,7 @@ class SettingsPage extends StatelessWidget {
         await mainPage.audioController.startAudioThread(
             selectedDevice: selectedDevice,
             androidAudioOutputRoute: appState.androidAudioOutputRoute,
+            detectAudioInterruptions: appState.detectAudioInterruptions,
             preferredSampleRate: appState.audioSampleRate);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

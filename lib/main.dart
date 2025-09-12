@@ -161,7 +161,7 @@ class MainPage extends StatefulWidget {
 }
 
 class MainPageState extends State<MainPage> {
-  late SXiLayer _sxiLayer;
+  late SXiLayer sxiLayer;
   late DeviceLayer deviceLayer;
   late SystemConfiguration _loadedConfig;
   late AppState appState;
@@ -192,6 +192,8 @@ class MainPageState extends State<MainPage> {
   // Track the displayed warning types to prevent duplicates
   final Set<String> _currentlyDisplayedWarnings = <String>{};
   DateTime? _lastOnAirPromptAt;
+  Timer? _onAirShowTimer;
+  String? _pendingOnAirKey;
 
   @override
   void initState() {
@@ -218,7 +220,7 @@ class MainPageState extends State<MainPage> {
         const AudioSessionConfiguration(
           androidAudioAttributes: AndroidAudioAttributes(
             contentType: AndroidAudioContentType.music,
-            flags: AndroidAudioFlags.audibilityEnforced,
+            //flags: AndroidAudioFlags.audibilityEnforced,
             usage: AndroidAudioUsage.media,
           ),
           androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
@@ -319,7 +321,7 @@ class MainPageState extends State<MainPage> {
     );
 
     // Initialize the SXi layer
-    _sxiLayer = SXiLayer(appState);
+    sxiLayer = SXiLayer(appState);
 
     // Try to startup the device layer
     bool startupSuccess = await tryStartup(lastPortString, lastPortObject);
@@ -365,7 +367,7 @@ class MainPageState extends State<MainPage> {
       // Create the device layer with the appropriate port
       if ((kIsWeb || kIsWasm) && portObject != null) {
         deviceLayer = DeviceLayer(
-          _sxiLayer,
+          sxiLayer,
           portObject,
           initialBaudRate,
           systemConfiguration: _loadedConfig,
@@ -376,7 +378,7 @@ class MainPageState extends State<MainPage> {
         );
       } else {
         deviceLayer = DeviceLayer(
-          _sxiLayer,
+          sxiLayer,
           portString,
           initialBaudRate,
           systemConfiguration: _loadedConfig,
@@ -663,6 +665,7 @@ class MainPageState extends State<MainPage> {
         await audioController.startAudioThread(
           selectedDevice: selectedDevice,
           androidAudioOutputRoute: appState.androidAudioOutputRoute,
+          detectAudioInterruptions: appState.detectAudioInterruptions,
           preferredSampleRate: appState.audioSampleRate,
         );
         logger.i('Audio started successfully');
@@ -730,6 +733,7 @@ class MainPageState extends State<MainPage> {
     appState.playbackInfoNotifier.removeListener(onPlaybackInfoChanged);
     appState.playbackStateNotifier.removeListener(onPlaybackStateChanged);
     appState.favoriteOnAirNotifier.removeListener(onFavoriteOnAir);
+    _onAirShowTimer?.cancel();
     channelTextFocusNode.dispose();
     super.dispose();
   }
@@ -737,23 +741,44 @@ class MainPageState extends State<MainPage> {
   void onFavoriteOnAir() {
     logger.d('Favorite On Air Event: ${appState.favoriteOnAirNotifier.value}');
     final evt = appState.favoriteOnAirNotifier.value;
-    if (!mounted) return;
-    if (evt != null) {
+    if (!mounted || evt == null) return;
+
+    if (evt.autoAdded) return;
+
+    final key = '${evt.sid}|${evt.matchedId}|${evt.type.name}';
+    if (_pendingOnAirKey == key && (_onAirShowTimer?.isActive ?? false)) {
+      return;
+    }
+    _pendingOnAirKey = key;
+    _onAirShowTimer?.cancel();
+    _onAirShowTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      if (_pendingOnAirKey != key) return;
+
+      // Ensure the matched favorite is still active and matches the channel
+      final channel = appState.sidMap[evt.sid];
+      if (channel == null) return;
+      final bool matchesChannel = (evt.type == FavoriteType.song)
+          ? (channel.airingSongId == evt.matchedId && channel.airingSongId != 0)
+          : (channel.airingArtistId == evt.matchedId &&
+              channel.airingArtistId != 0);
+      if (!matchesChannel) return;
+
       _lastOnAirPromptAt = DateTime.now();
       setState(() {});
-      // Schedule hide after 15 seconds unless a newer event arrives
-      Future.delayed(const Duration(seconds: 15), () {
+
+      // Schedule hide after 20 seconds unless a newer event arrives
+      Future.delayed(const Duration(seconds: 20), () {
         if (!mounted) return;
         if (_lastOnAirPromptAt != null &&
             DateTime.now().difference(_lastOnAirPromptAt!) >=
-                const Duration(seconds: 15)) {
+                const Duration(seconds: 20)) {
           setState(() {
-            // Clear to force title hide
             _lastOnAirPromptAt = null;
           });
         }
       });
-    }
+    });
   }
 
   // Update the playback info
@@ -821,7 +846,7 @@ class MainPageState extends State<MainPage> {
     return await EpgDialogHelper.showEpgDialog(
       context: context,
       appState: appState,
-      sxiLayer: _sxiLayer,
+      sxiLayer: sxiLayer,
       deviceLayer: deviceLayer,
       initialCategory: initialCategory,
       mainScrollController: mainScrollController,
@@ -1080,6 +1105,13 @@ class MainPageState extends State<MainPage> {
       final colorScheme = Theme.of(context).colorScheme;
       return TextButton.icon(
         onPressed: () {
+          // Hide the alert and end any pending timers
+          _onAirShowTimer?.cancel();
+          _pendingOnAirKey = null;
+          setState(() {
+            _lastOnAirPromptAt = null;
+          });
+
           FavoritesOnAirDialogHelper.show(
             context: context,
             appState: appState,
@@ -1886,25 +1918,31 @@ class MainPageState extends State<MainPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Favorite toggle button
-        IconButton(
-          tooltip: 'Favorite',
-          iconSize: 28,
-          icon: Icon(
-            appState.isNowPlayingSongFavorited() ||
+        if (!appState.isScanActive) ...[
+          // Favorite toggle button
+          IconButton(
+            tooltip: 'Favorite',
+            iconSize: 28,
+            icon: Icon(
+              appState.isNowPlayingSongFavorited() ||
+                      appState.isNowPlayingArtistFavorited()
+                  ? Icons.favorite
+                  : Icons.favorite_border,
+            ),
+            color: appState.isNowPlayingSongFavorited() ||
                     appState.isNowPlayingArtistFavorited()
-                ? Icons.favorite
-                : Icons.favorite_border,
+                ? Theme.of(context).colorScheme.primary
+                : null,
+            onPressed: () {
+              FavoriteDialogHelper.show(
+                context: context,
+                appState: appState,
+                deviceLayer: deviceLayer,
+              );
+            },
           ),
-          onPressed: () {
-            FavoriteDialogHelper.show(
-              context: context,
-              appState: appState,
-              deviceLayer: deviceLayer,
-            );
-          },
-        ),
-        const SizedBox(width: 8),
+          const SizedBox(width: 8),
+        ],
         // Rev button
         IconButton(
           icon: const Icon(Icons.skip_previous),

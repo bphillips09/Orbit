@@ -1,5 +1,11 @@
-import 'package:orbit/data/data_handlers.dart';
+import 'package:orbit/data/data_handler.dart';
 import 'package:orbit/crc.dart';
+import 'package:orbit/data/handlers/album_art_handler.dart';
+import 'package:orbit/data/handlers/channel_graphics_handler.dart';
+import 'package:orbit/data/handlers/ivsm_handler.dart';
+import 'package:orbit/data/handlers/movie_times_handler.dart';
+import 'package:orbit/data/handlers/program_guide_handler.dart';
+import 'package:orbit/data/handlers/tabular_weather_handler.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/data/sdtp.dart';
 import 'package:orbit/data/access_unit.dart';
@@ -19,16 +25,18 @@ class SDTPProcessor {
   final Map<int, DateTime> dmiFirstSeen = {};
   final Map<int, DSIHandler> dsiHandlers;
 
+  // Constructor for handlers we've implemented so far
   SDTPProcessor(SXiLayer sxiLayer)
       : dsiHandlers = {
           DataServiceIdentifier.albumArt.value: AlbumArtHandler(sxiLayer),
           DataServiceIdentifier.channelGraphicsUpdates.value:
               ChannelGraphicsHandler(sxiLayer),
+          DataServiceIdentifier.ivsm.value: IVSMHandler(sxiLayer),
+          DataServiceIdentifier.movieTimes.value: MovieTimesHandler(sxiLayer),
           DataServiceIdentifier.electronicProgramGuide.value:
               ProgramGuideHandler(sxiLayer),
           DataServiceIdentifier.sxmWeatherTabular.value:
               TabularWeatherHandler(sxiLayer),
-          DataServiceIdentifier.ivsm.value: IVSMHandler(sxiLayer),
         };
 
   void processSDTPPacket(
@@ -83,8 +91,8 @@ class SDTPProcessor {
       }
     }
 
-    // Drop stale DMIs older than 30 seconds to avoid growth
-    final cutoff = DateTime.now().subtract(const Duration(seconds: 30));
+    // Drop stale DMIs older than 300 seconds to avoid growth
+    final cutoff = DateTime.now().subtract(const Duration(seconds: 300));
     final stale = dmiFirstSeen.entries
         .where((e) => e.value.isBefore(cutoff))
         .map((e) => e.key)

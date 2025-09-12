@@ -33,6 +33,25 @@ IconData getCategoryIcon(String categoryName) {
   final String name = categoryName.toLowerCase();
 
   if (name.contains('sport') || name.contains('pxp')) {
+    if (name.contains('nfl')) {
+      return Icons.sports_football;
+    }
+    if (name.contains('nba')) {
+      return Icons.sports_basketball;
+    }
+    if (name.contains('mlb')) {
+      return Icons.sports_baseball;
+    }
+    if (name.contains('nhl')) {
+      return Icons.sports_hockey;
+    }
+    if (name.contains('ncaa')) {
+      return Icons.sports_soccer;
+    }
+    if (name.contains('cfl')) {
+      return Icons.sports_football;
+    }
+
     return Icons.sports_basketball;
   }
 
@@ -51,7 +70,7 @@ IconData getCategoryIcon(String categoryName) {
   }
 
   if (name.contains('more')) {
-    return Icons.read_more;
+    return Icons.library_music;
   }
 
   if (name.contains('canadian')) {

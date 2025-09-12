@@ -20,6 +20,7 @@ class AudioController {
   bool _isolateInitialized = false;
   bool _isStarted = false;
   String? _androidAudioOutputRoute;
+  bool _detectAudioInterruptions = true;
 
   final AudioStream _audioStream = getAudioStream();
   final PCMFormat format = PCMFormat.f32le;
@@ -158,8 +159,10 @@ class AudioController {
   Future<void> startAudioThread(
       {dynamic selectedDevice,
       String? androidAudioOutputRoute,
+      bool detectAudioInterruptions = true,
       int? preferredSampleRate}) async {
     logger.t('startAudioThread: $selectedDevice at $preferredSampleRate');
+    _detectAudioInterruptions = detectAudioInterruptions;
     if (preferredSampleRate != null && preferredSampleRate > 0) {
       sampleRate = preferredSampleRate;
     } else {
@@ -167,7 +170,8 @@ class AudioController {
     }
     // Initialize the AudioSession (runs on the main isolate)
     var session = await AudioSession.instance;
-    if (await session.setActive(true, androidWillPauseWhenDucked: true)) {
+    if (await session.setActive(true,
+        androidWillPauseWhenDucked: _detectAudioInterruptions)) {
       logger.i('Audio session active');
     } else {
       logger.e('Audio session setup failed');
@@ -178,32 +182,36 @@ class AudioController {
     try {
       await _interruptionSub?.cancel();
     } catch (_) {}
-    _interruptionSub = session.interruptionEventStream.listen((event) async {
-      logger.d('Audio interruption: begin=${event.begin} type=${event.type}');
-      if (event.begin) {
-        // Pause capture if currently recording
-        try {
-          if (_recordStreamStarted) {
-            final isRec = await record.isRecording();
-            final isPaused = await record.isPaused();
-            if (isRec && !isPaused) {
-              _wasPausedByInterruption = true;
-              await record.pause();
-            }
-          }
-        } catch (_) {}
-      } else {
-        // Resume only if we paused due to the interruption
-        if (_wasPausedByInterruption) {
-          // Re-apply preferred route first to avoid stale routing after Assistant
-          await _applyPreferredAndroidRoute();
-          _wasPausedByInterruption = false;
+    if (_detectAudioInterruptions) {
+      _interruptionSub = session.interruptionEventStream.listen((event) async {
+        logger.d('Audio interruption: begin=${event.begin} type=${event.type}');
+        if (event.begin) {
+          // Pause capture if currently recording
           try {
-            await record.resume();
+            if (_recordStreamStarted) {
+              final isRec = await record.isRecording();
+              final isPaused = await record.isPaused();
+              if (isRec && !isPaused) {
+                _wasPausedByInterruption = true;
+                await record.pause();
+              }
+            }
           } catch (_) {}
+        } else {
+          // Resume only if we paused due to the interruption
+          if (_wasPausedByInterruption) {
+            // Re-apply preferred route first to avoid stale routing after Assistant
+            await _applyPreferredAndroidRoute();
+            _wasPausedByInterruption = false;
+            try {
+              await record.resume();
+            } catch (_) {}
+          }
         }
-      }
-    });
+      });
+    } else {
+      _interruptionSub = null;
+    }
 
     if (usesRecordPlugin) {
       _useIsolate = false;
@@ -328,8 +336,10 @@ class AudioController {
         manageBluetooth: false,
         audioSource: AndroidAudioSource.unprocessed,
       ),
-      // Disable plugin-level auto pause/resume; handled by AudioSession above.
-      audioInterruption: AudioInterruptionMode.none,
+      // Plugin interruption behavior depends on setting (pause only, resume by us)
+      audioInterruption: _detectAudioInterruptions
+          ? AudioInterruptionMode.pause
+          : AudioInterruptionMode.none,
       device: device,
     ));
     _recordStreamStarted = true;

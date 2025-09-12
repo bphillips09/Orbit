@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:orbit/app_state.dart';
 import 'package:orbit/device_layer.dart';
+import 'package:orbit/data/favorites_on_air_entry.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/helpers.dart';
@@ -32,6 +33,20 @@ class _FavoritesOnAirDialogState extends State<FavoritesOnAirDialog> {
       animation: widget.appState,
       builder: (context, _) {
         final entries = widget.appState.favoritesOnAirEntries;
+        // If both song and artist are present for the same channel, prefer showing the song entry
+        final Map<String, FavoriteOnAirEntry> uniqueMap = {};
+        for (final e in entries) {
+          final key = '${e.sid}|${e.channelNumber}';
+          final existing = uniqueMap[key];
+          if (existing == null) {
+            uniqueMap[key] = e;
+          } else {
+            if (existing.isArtist && e.isSong) {
+              uniqueMap[key] = e;
+            }
+          }
+        }
+        final List<FavoriteOnAirEntry> deduped = uniqueMap.values.toList();
         return AlertDialog(
           title: Row(
             children: [
@@ -52,13 +67,13 @@ class _FavoritesOnAirDialogState extends State<FavoritesOnAirDialog> {
           content: SizedBox(
             width: 420,
             height: 520,
-            child: entries.isEmpty
+            child: deduped.isEmpty
                 ? const Center(child: Text('No favorites on air right now'))
                 : ListView.separated(
-                    itemCount: entries.length,
+                    itemCount: deduped.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 6),
                     itemBuilder: (context, index) {
-                      final e = entries[index];
+                      final e = deduped[index];
                       final channel = widget.appState.sidMap[e.sid];
                       final logoBytes =
                           widget.appState.storageData.getImageForSid(e.sid);

@@ -204,14 +204,20 @@ class SXiLayer {
         Suspend Year: ${subscriptionInfo.suspendYear}
         Reason Text: ${String.fromCharCodes(subscriptionInfo.reasonText)}
         Phone Number: ${String.fromCharCodes(subscriptionInfo.phoneNumber)}
+        Device ID: ${subscriptionInfo.deviceId}
         <----- SUBSCRIPTION STATUS END ----->""";
         logger.d(subscriptionInfoString);
 
         appState.updateSubscriptionStatus(
           subscriptionInfo.subscriptionStatus,
+          subscriptionInfo.radioID,
           String.fromCharCodes(subscriptionInfo.reasonText),
           String.fromCharCodes(subscriptionInfo.phoneNumber),
         );
+
+        if (subscriptionInfo.deviceId != 0) {
+          appState.updateDeviceId(subscriptionInfo.deviceId);
+        }
 
         switch (SubscriptionStatus.getByValue(
             subscriptionInfo.subscriptionStatus)) {
@@ -302,12 +308,13 @@ class SXiLayer {
 
         var programIdAsInt = bytesToInt32(channelSelect.programID);
 
+        final bool isLive = appState.playbackState == AppPlaybackState.live;
         appState.updateNowPlayingWithNewData(
           channelSelect.chanNameLong,
           channelSelect.songExtd,
           channelSelect.artistExtd,
-          channelData?.airingSongId ?? 0,
-          channelData?.airingArtistId ?? 0,
+          isLive ? (channelData?.airingSongId) : null,
+          isLive ? (channelData?.airingArtistId) : null,
           channelSelect.catID,
           bitCombine(channelSelect.chanIDMsb, channelSelect.chanIDLsb),
           bitCombine(channelSelect.sidMsb, channelSelect.sidLsb),
@@ -592,13 +599,44 @@ class SXiLayer {
         break;
 
       case SXiPackageIndication packageInfo:
-        String packageString = """<----- PACKAGE BEGIN ----->\n
-        Ind Code: ${IndicationCode.getByValue(packageInfo.indCode)}
-        Array Hash: ${String.fromCharCodes(packageInfo.arrayHash)}
-        Option: ${PackageOptionType.getByValue(packageInfo.option)}
-        BL Ante UPC: ${bitCombine(packageInfo.baseLayerAnteUPCMsb, packageInfo.baseLayerAnteUPCLsb)}
-        BL Disp UPC: ${bitCombine(packageInfo.baseLayerPostUPCMsb, packageInfo.baseLayerPostUPCLsb)}
-        <----- PACKAGE END ----->""";
+        final radioIdStr = String.fromCharCodes(packageInfo.radioID);
+        final arrayHashHex = packageInfo.arrayHash
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join(' ')
+            .toUpperCase();
+        final pkgMacHex = packageInfo.pkgMAC
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join(' ')
+            .toUpperCase();
+
+        final blAnteUpc = bitCombine(
+            packageInfo.baseLayerAnteUPCMsb, packageInfo.baseLayerAnteUPCLsb);
+        final blPostUpc = bitCombine(
+            packageInfo.baseLayerPostUPCMsb, packageInfo.baseLayerPostUPCLsb);
+        final blDispUpc = bitCombine(
+            packageInfo.baseLayerDispUPCMsb, packageInfo.baseLayerDispUPCLsb);
+        final olAnteUpc = bitCombine(packageInfo.overlayLayerAnteUPCMsb,
+            packageInfo.overlayLayerAnteUPCLsb);
+        final olPostUpc = bitCombine(packageInfo.overlayLayerPostUPCMsb,
+            packageInfo.overlayLayerPostUPCLsb);
+        final olDispUpc = bitCombine(packageInfo.overlayLayerDispUPCMsb,
+            packageInfo.overlayLayerDispUPCLsb);
+
+        appState.updateRadioId(packageInfo.radioID);
+
+        String packageString = '<----- PACKAGE BEGIN ----->'
+            '\n(Package) Ind Code: ${IndicationCode.getByValue(packageInfo.indCode)}'
+            '\n(Package) Radio ID: $radioIdStr'
+            '\n(Package) Option: ${PackageOptionType.getByValue(packageInfo.option)}'
+            '\n(Package) Array Hash: $arrayHashHex'
+            '\n(Package) Pkg MAC: $pkgMacHex'
+            '\n(Package) BL Ante UPC: $blAnteUpc'
+            '\n(Package) BL Post UPC: $blPostUpc'
+            '\n(Package) BL Disp UPC: $blDispUpc'
+            '\n(Package) OL Ante UPC: $olAnteUpc'
+            '\n(Package) OL Post UPC: $olPostUpc'
+            '\n(Package) OL Disp UPC: $olDispUpc'
+            '\n<----- PACKAGE END ----->';
         logger.t(packageString);
         break;
 

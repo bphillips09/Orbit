@@ -288,6 +288,7 @@ class SXiSubscriptionStatusIndication extends SXiPayload {
   final int suspendYear;
   final List<int> reasonText;
   final List<int> phoneNumber;
+  final int deviceId;
 
   SXiSubscriptionStatusIndication.fromBytes(List<int> frame)
       : indCode = frame[3],
@@ -299,6 +300,22 @@ class SXiSubscriptionStatusIndication extends SXiPayload {
         suspendYear = frame[17],
         reasonText = SXiPayload.parseNextString(frame, 18),
         phoneNumber = SXiPayload.parseNextString(frame, SXiPayload.nextIndex),
+        deviceId = (() {
+          int start = SXiPayload.nextIndex;
+          int remaining = frame.length - start;
+
+          if (remaining >= 5 && frame[start] == 0x00) {
+            start++;
+            remaining--;
+          }
+          if (start + 3 < frame.length) {
+            return (frame[start] << 24) |
+                (frame[start + 1] << 16) |
+                (frame[start + 2] << 8) |
+                (frame[start + 3]);
+          }
+          return 0;
+        })(),
         super(frame[0], frame[1], frame[2]);
 
   @override
@@ -313,6 +330,10 @@ class SXiSubscriptionStatusIndication extends SXiPayload {
       suspendYear,
       ...reasonText,
       ...phoneNumber,
+      (deviceId >> 24) & 0xFF,
+      (deviceId >> 16) & 0xFF,
+      (deviceId >> 8) & 0xFF,
+      deviceId & 0xFF,
     ];
   }
 }
@@ -1665,36 +1686,36 @@ class SXiDataPacketIndication extends SXiPayload {
 
 class SXiAuthenticationIndication extends SXiPayload {
   final int indCode;
-  final List<int> data;
+  final List<int> deviceState;
 
   SXiAuthenticationIndication.fromBytes(List<int> frame)
       : indCode = frame[3],
-        data = frame.sublist(4),
+        deviceState = frame.sublist(4),
         super(frame[0], frame[1], frame[2]);
 
   @override
   List<int> getParameters() {
     return [
       indCode,
-      ...data,
+      ...deviceState,
     ];
   }
 }
 
 class SXiIPAuthenticationIndication extends SXiPayload {
   final int indCode;
-  final List<int> data;
+  final List<int> signedChallenge;
 
   SXiIPAuthenticationIndication.fromBytes(List<int> frame)
       : indCode = frame[3],
-        data = frame.sublist(4),
+        signedChallenge = frame.sublist(4),
         super(frame[0], frame[1], frame[2]);
 
   @override
   List<int> getParameters() {
     return [
       indCode,
-      ...data,
+      ...signedChallenge,
     ];
   }
 }
