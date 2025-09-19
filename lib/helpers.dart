@@ -1,4 +1,6 @@
 // Helpers, utility functions
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 // Detect landscape orientation
@@ -118,6 +120,33 @@ int bytesToInt32(List<int> bytes) {
   }
 
   return (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+}
+
+// Truncate a string
+String truncate(String s, {int max = 2000}) {
+  if (s.length <= max) return s;
+  return '${s.substring(0, max)}… (truncated)';
+}
+
+// Convert a list of bytes to a hex string
+String bytesToHex(List<int> bytes, {bool upperCase = true}) {
+  final sb = StringBuffer();
+  for (final b in bytes) {
+    sb.write(((b & 0xFF).toRadixString(16)).padLeft(2, '0'));
+  }
+  final s = sb.toString();
+  return upperCase ? s.toUpperCase() : s;
+}
+
+// Convert a hex string to a list of bytes
+List<int> hexStringToBytes(String hex) {
+  String cleaned = hex.trim();
+  if (cleaned.length % 2 == 1) cleaned = '0$cleaned';
+  final out = Uint8List(cleaned.length ~/ 2);
+  for (int i = 0; i < cleaned.length; i += 2) {
+    out[i >> 1] = int.parse(cleaned.substring(i, i + 2), radix: 16);
+  }
+  return out;
 }
 
 // Process a DMI byte list into big-endian 16-bit values

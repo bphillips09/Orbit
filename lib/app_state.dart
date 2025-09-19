@@ -73,6 +73,8 @@ class AppState extends ChangeNotifier {
   final Map<int, ChannelData> sidMap = {};
   bool _updatingCategories = false;
   bool _updatingChannels = false;
+  Timer? _categoriesUpdateTimer;
+  Timer? _channelsUpdateTimer;
   int _currentCategory = 0;
   int _currentChannel = 0;
   int _currentSid = 0;
@@ -165,6 +167,8 @@ class AppState extends ChangeNotifier {
   int get maxSportsFlash => _maxSportsFlash;
   int get maxTWNow => _maxTWNow;
   DateTime? get deviceTime => _deviceTime;
+
+  static const Duration _updateTimeout = Duration(seconds: 20);
 
   Map<int, String> get categories => SplayTreeMap<int, String>.from(_categories
       .map((catId, catName) => MapEntry(catId, String.fromCharCodes(catName))));
@@ -379,6 +383,34 @@ class AppState extends ChangeNotifier {
         mediaKeyBehaviorIndex.clamp(0, MediaKeyBehavior.values.length - 1)];
 
     notifyListeners();
+  }
+
+  void _scheduleChannelsUpdateTimeout() {
+    _channelsUpdateTimer?.cancel();
+    _channelsUpdateTimer = Timer(_updateTimeout, () {
+      if (_updatingChannels) {
+        logger.w('Channel update timed out after ${_updateTimeout.inSeconds}s');
+        _updatingChannels = false;
+        notifyListeners();
+      }
+    });
+  }
+
+  void _scheduleCategoriesUpdateTimeout() {
+    _categoriesUpdateTimer?.cancel();
+    _categoriesUpdateTimer = Timer(_updateTimeout, () {
+      if (_updatingCategories) {
+        logger
+            .w('Category update timed out after ${_updateTimeout.inSeconds}s');
+        _updatingCategories = false;
+        notifyListeners();
+      }
+    });
+  }
+
+  void _cancelUpdateTimers() {
+    _channelsUpdateTimer?.cancel();
+    _categoriesUpdateTimer?.cancel();
   }
 
   void updateLastSid(int sid) {
@@ -745,8 +777,10 @@ class AppState extends ChangeNotifier {
   void addChannel(int sid, int channel, String channelName, int catId) {
     if (sid == 0) {
       _updatingChannels = false;
+      _channelsUpdateTimer?.cancel();
     } else {
       _updatingChannels = true;
+      _scheduleChannelsUpdateTimeout();
     }
 
     sidMap[sid] = ChannelData(sid, channel, catId, channelName);
@@ -757,8 +791,10 @@ class AppState extends ChangeNotifier {
   void addCategory(int catId, List<int> categoryName) {
     if (catId == 255) {
       _updatingCategories = false;
+      _categoriesUpdateTimer?.cancel();
     } else {
       _updatingCategories = true;
+      _scheduleCategoriesUpdateTimeout();
     }
 
     _categories[catId] = categoryName;
@@ -896,6 +932,12 @@ class AppState extends ChangeNotifier {
       _syncOnAirAfterAddition(f);
     }
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _cancelUpdateTimers();
+    super.dispose();
   }
 
   void updatePlaybackState(

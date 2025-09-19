@@ -7,6 +7,7 @@ import 'package:orbit/serial_helper/serial_helper_interface.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/sxi_indication_types.dart';
+import 'package:orbit/sxi_indications.dart';
 import 'package:orbit/sxi_payload.dart';
 import 'package:orbit/sxi_layer.dart';
 import 'package:orbit/logging.dart';
@@ -46,6 +47,9 @@ class DeviceLayer {
       this.onError,
       this.onConnectionDetailChanged,
       this.onClearMessages});
+
+  // Read-only stream of device messages
+  Stream<DeviceMessage> get messageStream => _receiveController.stream;
 
   void _updateConnectionDetail(String details,
       {String title = 'Connecting...'}) {
@@ -252,6 +256,14 @@ class DeviceLayer {
               try {
                 final message = DeviceMessage.fromBytes(frame);
                 _receiveController.add(message);
+
+                if (message.payload.runtimeType ==
+                        SXiSubscriptionStatusIndication ||
+                    message.payload.runtimeType ==
+                        SXiAuthenticationIndication) {
+                  logger.d(
+                      'Subscription/auth status indication: ${message.payload.toBytes().map((e) => e.toRadixString(16)).join(' ')}');
+                }
 
                 _highestReceivedSequence = message.sequence;
                 _sxiLayer.processMessage(message);
@@ -557,6 +569,8 @@ class DeviceLayer {
       SXiAudioVolumeCommand(volume),
       // Unmute audio
       SXiAudioMuteCommand(AudioMuteType.unmute),
+      // Report the active package
+      SXiPackageCommand(PackageOptionType.report, 0),
       // Setup metadata monitors (stop all active monitors)
       SXiMonitorExtendedMetadataCommand(
           MetadataMonitorType.extendedGlobalMetadata,

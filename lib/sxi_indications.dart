@@ -1687,10 +1687,14 @@ class SXiDataPacketIndication extends SXiPayload {
 class SXiAuthenticationIndication extends SXiPayload {
   final int indCode;
   final List<int> deviceState;
+  final int deviceId;
 
   SXiAuthenticationIndication.fromBytes(List<int> frame)
       : indCode = frame[3],
-        deviceState = frame.sublist(4),
+        deviceState = frame.length >= 4 ? frame.sublist(4) : [],
+        deviceId = frame.length >= 9
+            ? frame.sublist(5, 9).reduce((a, b) => a << 8 | b)
+            : 0,
         super(frame[0], frame[1], frame[2]);
 
   @override

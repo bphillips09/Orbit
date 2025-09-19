@@ -98,19 +98,6 @@ class _EpgDialogState extends State<EpgDialog> {
     }
   }
 
-  void _refreshDialog() {
-    setState(() {
-      _sortedChannels = widget.appState.sidMap.values.toList()
-        ..sort((a, b) => a.channelNumber.compareTo(b.channelNumber));
-      if (_sortedChannels.length > 2) {
-        _sortedChannels = _sortedChannels.sublist(2);
-      }
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _setupInitialScrolling();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     var currentPrograms = widget.appState.sidMap.values.toList();

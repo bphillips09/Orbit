@@ -732,6 +732,15 @@ class SXiLayer {
 
         break;
 
+      case SXiAuthenticationIndication authenticationInfo:
+        logger.d('Authentication Device ID: ${authenticationInfo.deviceId}');
+        break;
+
+      case SXiIPAuthenticationIndication ipAuthenticationInfo:
+        logger.d(
+            'IP Authentication Indication: ${ipAuthenticationInfo.signedChallenge}');
+        break;
+
       // Generic payload
       case GenericPayload genericPayload:
         logger.d(
