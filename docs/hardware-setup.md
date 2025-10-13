@@ -21,16 +21,21 @@ This guide shows how to wire the SXV300 to a USB UART, audio input, and power. T
         <div>Female (radio)</div>
       </td>
     </tr>
+    <tr>
+      <td align="center" colspan="2" style="border: none;">
+        <img src="https://i.imgur.com/zOdhpMo.png" width="320" height="180" alt="Headunit pinout (Dynavin)" />
+        <div>Dynavin</div>
+    </tr>
   </table>
 </div>
 
 | Pin | SXV300 | Dynavin Cable | UART Adapter |
 | --- | --- | --- | --- |
-| 1 | GND $\color{green}{\blacksquare}$ | GND $\color{blue}{\blacksquare}$ | GND |
+| 1 | GND $\color{green}{\blacksquare}$ | GND $\color{black}{\blacksquare}$ | GND |
 | 2 | 12V $\color{red}{\blacksquare}$ | 12V $\color{yellow}{\blacksquare}$ |  |
 | 3 | Power Enable $\color{blue}{\blacksquare}$ | Power Enable $\color{orange}{\blacksquare}$ |  |
 | 4 | Audio R $\color{purple}{\blacksquare}$ | Audio R $\color{red}{\blacksquare}$ |  |
-| 5 | Audio GND $\color{black}{\blacksquare}$ | Audio GND $\color{black}{\blacksquare}$ |  |
+| 5 | Audio GND $\color{black}{\blacksquare}$ | Audio GND $\color{blue}{\blacksquare}$ |  |
 | 6 | Tuner RX $\color{yellow}{\blacksquare}$ | Tuner RX $\color{brown}{\blacksquare}$ | <-- TX |
 | 7 | Audio L $\color{white}{\blacksquare}$ | Audio L $\color{green}{\blacksquare}$ |  |
 | 8 | Tuner TX $\color{orange}{\blacksquare}$ | Tuner TX $\color{white}{\blacksquare}$ | --> RX |
