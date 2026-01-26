@@ -2,8 +2,16 @@
 // Mostly self-explanatory
 enum DataServiceIdentifier {
   none(0),
+  globalMetadata(1),
+  widebandMetadata(2),
+  updateFiles(3),
+  channelLogoUpdateInformation(5),
+  sportsLogos(6),
+  categoryBackgroundImages(7),
+  promotionalInformation(0xa),
   electronicProgramGuide(0x12c),
   channelGraphicsUpdates(0x137),
+  albumArt(0x13b),
   phoneticsUpdate(0x14a),
   xmNavTraffic(0x190),
   xmWxWeatherAppId10(0x19a),
@@ -33,15 +41,15 @@ enum DataServiceIdentifier {
   airTravel(0x208),
   sports(0x212),
   fuelPrices(0x258),
+  canFuelPrices(0x259),
   movieTimes(0x262),
   safetyCameras(0x26c),
   parking(0x280),
-  albumArt(0x13b),
   showcase(0x32a),
   v2v(0x2c1), // Vehicle to vehicle?
   v2vCrl(0x2bc), // Vehicle to vehicle control?
-  ev(0x276),
-  ivsm(0x27b); // In vehicle subscription messaging?
+  evChargingStations(0x276),
+  inVehicleSubscriptionMessaging(0x27b);
 
   const DataServiceIdentifier(this.value);
   final int value;
