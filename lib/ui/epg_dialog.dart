@@ -456,7 +456,7 @@ class _EpgDialogState extends State<EpgDialog> {
                         ChanSelectionType.tuneUsingChannelNumber,
                         program.channelNumber,
                         0xFF,
-                        Overrides.all(),
+                        ChannelAttributes.all(),
                         AudioRoutingType.routeToAudio,
                       );
                       widget.deviceLayer.sendControlCommand(cfgCmd);

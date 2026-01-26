@@ -54,7 +54,7 @@ class AudioServiceHandler extends BaseAudioHandler
             ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
             nowPlaying!.channelNumber,
             0xFF,
-            Overrides.all(),
+            ChannelAttributes.all(),
             AudioRoutingType.routeToAudio));
         break;
       case MediaKeyBehavior.presetCycle:
@@ -75,7 +75,7 @@ class AudioServiceHandler extends BaseAudioHandler
             ChanSelectionType.tuneToNextHigherChannelNumberInCategory,
             nowPlaying!.channelNumber,
             0xFF,
-            Overrides.all(),
+            ChannelAttributes.all(),
             AudioRoutingType.routeToAudio));
         break;
       case MediaKeyBehavior.presetCycle:
@@ -95,7 +95,7 @@ class AudioServiceHandler extends BaseAudioHandler
           ChanSelectionType.skipBackToPreviousScanItem,
           0,
           appState.currentCategory,
-          Overrides.all(),
+          ChannelAttributes.all(),
           AudioRoutingType.routeToAudio);
       deviceLayer.sendControlCommand(cfgCmd);
     } else {
@@ -112,7 +112,7 @@ class AudioServiceHandler extends BaseAudioHandler
           ChanSelectionType.skipForwardToNextScanItem,
           0,
           appState.currentCategory,
-          Overrides.all(),
+          ChannelAttributes.all(),
           AudioRoutingType.routeToAudio);
       deviceLayer.sendControlCommand(cfgCmd);
     } else {
@@ -132,7 +132,7 @@ class AudioServiceHandler extends BaseAudioHandler
       ChanSelectionType.tuneUsingSID,
       targetSid,
       0xFF,
-      Overrides.all(),
+      ChannelAttributes.all(),
       AudioRoutingType.routeToAudio,
     );
     deviceLayer.sendControlCommand(cfgCmd);

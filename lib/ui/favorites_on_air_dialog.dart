@@ -129,7 +129,7 @@ class _FavoritesOnAirDialogState extends State<FavoritesOnAirDialog> {
                             ChanSelectionType.tuneUsingChannelNumber,
                             e.channelNumber,
                             0xFF,
-                            Overrides.all(),
+                            ChannelAttributes.all(),
                             AudioRoutingType.routeToAudio,
                           );
                           widget.deviceLayer.sendControlCommand(cfgCmd);

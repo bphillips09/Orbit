@@ -78,7 +78,7 @@ class _ChannelInfoDialogState extends State<ChannelInfoDialog> {
       ChanSelectionType.tuneUsingChannelNumber,
       channel.channelNumber,
       0xFF,
-      Overrides.all(),
+      ChannelAttributes.all(),
       AudioRoutingType.routeToAudio,
     );
     widget.deviceLayer.sendControlCommand(cfgCmd);
