@@ -48,11 +48,11 @@ class TabularWeatherHandler extends DSIHandler {
     switch (carid) {
       case 0:
         logger.d('TabularWeatherHandler: Forecast AU received');
-        _handleForecast(bitBuffer);
+        _handleForecast(bitBuffer, unit);
         break;
       case 1:
         logger.d('TabularWeatherHandler: Ski Condition AU received');
-        _handleSkiCond(bitBuffer);
+        _handleSkiCond(bitBuffer, unit);
         break;
       case 2:
         // Reliable File Delivery (Weather Data)
@@ -103,7 +103,7 @@ class TabularWeatherHandler extends DSIHandler {
     }
   }
 
-  void _handleForecast(BitBuffer b) {
+  void _handleForecast(BitBuffer b, AccessUnit unit) {
     final int forecastType = b.readBits(4);
     logger.t('TabularWeatherHandler: Forecast: type=$forecastType');
     if (forecastType >= 10) {
@@ -119,7 +119,9 @@ class TabularWeatherHandler extends DSIHandler {
     if (aseq == 3) {
       state = b.readBits(6);
     } else if (aseq == 2) {
-      state = 1;
+      // Derive state from body when ASEQ==2 instead of defaulting to 1
+      final int? derived = _deriveFirstStateFromBody(unit.data);
+      state = derived ?? 1;
     } else {
       logger.w(
           'TabularWeatherHandler: Forecast: invalid ASEQ for first location: $aseq');
@@ -133,13 +135,18 @@ class TabularWeatherHandler extends DSIHandler {
       return;
     }
 
-    // Remaining AU body
-    b.align();
-    final List<int> body = b.remainingData;
+    // Remaining AU body from AU payload to preserve original packing
+    final List<int> body = unit.data;
     if (body.isEmpty) {
       logger.w('TabularWeatherHandler: Forecast: empty AU body');
       return;
     }
+
+    try {
+      final ForecastRecord? rec = parseForecastFor(state, locId, body);
+      logger.i(
+          'TabularWeatherHandler: Forecast recv: type=$forecastType state=$state loc=$locId event=${rec?.eventCode ?? -1} ${rec?.toString() ?? ''}');
+    } catch (_) {}
 
     final int hash = CRC32.calculate(body);
     logger.t(
@@ -161,7 +168,7 @@ class TabularWeatherHandler extends DSIHandler {
         'TabularWeatherHandler: Forecast: saved type $forecastType (State: $state, LocId: $locId, size: ${body.length})');
   }
 
-  void _handleSkiCond(BitBuffer b) {
+  void _handleSkiCond(BitBuffer b, AccessUnit unit) {
     final int aseq = b.readBits(2);
     final int locId = b.readBits(7);
     logger.t('TabularWeatherHandler: Ski: aseq=$aseq locId=$locId');
@@ -169,7 +176,9 @@ class TabularWeatherHandler extends DSIHandler {
     if (aseq == 3) {
       state = b.readBits(6);
     } else if (aseq == 2) {
-      state = 1;
+      // Derive state from body when ASEQ==2 instead of defaulting to 1
+      final int? derived = _deriveFirstStateFromBody(unit.data);
+      state = derived ?? 1;
     } else {
       logger.w(
           'TabularWeatherHandler: Ski: invalid ASEQ for first location: $aseq');
@@ -183,12 +192,19 @@ class TabularWeatherHandler extends DSIHandler {
       return;
     }
 
-    b.align();
-    final List<int> body = b.remainingData;
+    // Remaining AU body from AU payload to preserve original packing
+    final List<int> body = unit.data;
     if (body.isEmpty) {
       logger.w('TabularWeatherHandler: Ski: empty AU body');
       return;
     }
+
+    // Log parsed event for this state/location (if available)
+    try {
+      final ForecastRecord? rec = parseForecastFor(state, locId, body);
+      logger.i(
+          'TabularWeatherHandler: Ski recv: state=$state loc=$locId event=${rec?.eventCode ?? -1}');
+    } catch (_) {}
 
     final int hash = CRC32.calculate(body);
     logger.t(
@@ -205,6 +221,37 @@ class TabularWeatherHandler extends DSIHandler {
     _addOrUpdateEntry(_skiCache, entry);
     logger.i(
         'TabularWeatherHandler: Ski: saved (State: $state, LocId: $locId, size: ${body.length})');
+  }
+
+  int? _deriveFirstStateFromBody(List<int> body) {
+    if (body.isEmpty) return null;
+    final BitBuffer bb = BitBuffer(body);
+    // Skip initial 11 bits
+    bb.readBits(11);
+    int curState = 0;
+    int curLoc = 0;
+    while (!bb.hasError) {
+      final int tag = bb.readBits(2);
+      if (bb.hasError) break;
+      switch (tag) {
+        case 0:
+          curLoc = (curLoc + 1) & 0x3F;
+          break;
+        case 1:
+          curLoc = bb.readBits(6);
+          break;
+        case 2:
+          curState = bb.readBits(7);
+          return curState;
+        case 3:
+          curState = bb.readBits(7);
+          curLoc = bb.readBits(6);
+          return curState;
+        default:
+          return null;
+      }
+    }
+    return null;
   }
 
   bool _checkAuCrc(AccessUnit unit) {

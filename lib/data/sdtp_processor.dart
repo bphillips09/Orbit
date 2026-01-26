@@ -2,10 +2,13 @@ import 'package:orbit/data/data_handler.dart';
 import 'package:orbit/crc.dart';
 import 'package:orbit/data/handlers/album_art_handler.dart';
 import 'package:orbit/data/handlers/channel_graphics_handler.dart';
+import 'package:orbit/data/handlers/fuel_handler.dart';
 import 'package:orbit/data/handlers/ivsm_handler.dart';
 import 'package:orbit/data/handlers/movie_times_handler.dart';
 import 'package:orbit/data/handlers/program_guide_handler.dart';
 import 'package:orbit/data/handlers/tabular_weather_handler.dart';
+import 'package:orbit/data/handlers/graphical_weather_handler.dart';
+import 'package:orbit/data/handlers/unhandled_handler.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/data/sdtp.dart';
 import 'package:orbit/data/access_unit.dart';
@@ -31,12 +34,17 @@ class SDTPProcessor {
           DataServiceIdentifier.albumArt.value: AlbumArtHandler(sxiLayer),
           DataServiceIdentifier.channelGraphicsUpdates.value:
               ChannelGraphicsHandler(sxiLayer),
-          DataServiceIdentifier.ivsm.value: IVSMHandler(sxiLayer),
+          DataServiceIdentifier.inVehicleSubscriptionMessaging.value:
+              IVSMHandler(sxiLayer),
           DataServiceIdentifier.movieTimes.value: MovieTimesHandler(sxiLayer),
           DataServiceIdentifier.electronicProgramGuide.value:
               ProgramGuideHandler(sxiLayer),
           DataServiceIdentifier.sxmWeatherTabular.value:
               TabularWeatherHandler(sxiLayer),
+          DataServiceIdentifier.sxmWeatherGraphical.value:
+              GraphicalWeatherHandler(sxiLayer),
+          DataServiceIdentifier.fuelPrices.value: FuelHandler(sxiLayer),
+          DataServiceIdentifier.none.value: UnhandledHandler(sxiLayer),
         };
 
   void processSDTPPacket(
@@ -47,6 +55,12 @@ class SDTPProcessor {
       // For non-final packets the PLPC is a countdown (4 means expect 5 packets)
       expectedPacketCount[dmi] = packet.header.plpc + 1;
       dmiFirstSeen[dmi] = DateTime.now();
+    }
+
+    if (dsi != DataServiceIdentifier.albumArt &&
+        dsi != DataServiceIdentifier.channelGraphicsUpdates) {
+      logger.d(
+          'Processing SDTP packet for DSI: $dsi, SOA: ${packet.header.soa}, EOA: ${packet.header.eoa}');
     }
 
     // If we are accumulating packets for this DMI, add this one
@@ -87,6 +101,8 @@ class SDTPProcessor {
           handler.onAccessUnitComplete(accessUnit);
         } else {
           logger.w('No handler for DSI: $dsi at time ${DateTime.now()}');
+          dsiHandlers[DataServiceIdentifier.none.value]!
+              .onAccessUnitComplete(accessUnit);
         }
       }
     }

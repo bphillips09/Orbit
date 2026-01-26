@@ -18,6 +18,7 @@ import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/data/favorite.dart';
 import 'package:orbit/data/favorites_on_air_entry.dart';
 import 'package:orbit/data/favorite_on_air_event.dart';
+import 'package:orbit/data/radar_overlay.dart';
 import 'package:orbit/debug_tools_stub.dart'
     if (dart.library.io) 'package:orbit/debug_tools.dart';
 
@@ -175,6 +176,12 @@ class AppState extends ChangeNotifier {
 
   Map<int, PlaybackInfo> channelPlaybackMetadata = {};
   final Map<int, Map<int, List<int>>> imageMap = {};
+
+  final ValueNotifier<RadarOverlay?> radarOverlayNotifier =
+      ValueNotifier<RadarOverlay?>(null);
+  final ValueNotifier<List<RadarOverlay>> radarOverlaysNotifier =
+      ValueNotifier<List<RadarOverlay>>(<RadarOverlay>[]);
+  DateTime? _currentRadarTimestamp;
 
   List<FavoriteOnAirEntry> get favoritesOnAirEntries =>
       List<FavoriteOnAirEntry>.unmodifiable(_favoritesOnAirEntries);
@@ -1050,6 +1057,34 @@ class AppState extends ChangeNotifier {
 
   void updateNowPlayingImage(List<int> img) {
     nowPlaying.image = Uint8List.fromList(img);
+  }
+
+  void updateRadarOverlay(RadarOverlay? overlay) {
+    radarOverlayNotifier.value = overlay;
+    notifyListeners();
+  }
+
+  void addRadarOverlay(RadarOverlay overlay, DateTime timestamp) {
+    if (_currentRadarTimestamp == null ||
+        !_isSameTimestamp(timestamp, _currentRadarTimestamp!)) {
+      _currentRadarTimestamp = timestamp;
+      radarOverlaysNotifier.value = <RadarOverlay>[overlay];
+    } else {
+      final List<RadarOverlay> next =
+          List<RadarOverlay>.from(radarOverlaysNotifier.value)..add(overlay);
+      radarOverlaysNotifier.value = next;
+    }
+    notifyListeners();
+  }
+
+  void clearRadarOverlays() {
+    radarOverlaysNotifier.value = <RadarOverlay>[];
+    _currentRadarTimestamp = null;
+    notifyListeners();
+  }
+
+  bool _isSameTimestamp(DateTime a, DateTime b) {
+    return a.isAtSameMomentAs(b);
   }
 
   void updateNowPlayingChannelImage() {
