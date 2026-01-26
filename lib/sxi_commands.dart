@@ -290,6 +290,46 @@ class SXiAudioVolumeCommand extends SXiPayload {
   }
 }
 
+class SXiAudioToneBassAndTrebleCommand extends SXiPayload {
+  int bass;
+  int treble;
+
+  SXiAudioToneBassAndTrebleCommand(this.bass, this.treble)
+      : super(0x01, 0x02, 0);
+
+  @override
+  List<int> getParameters() {
+    treble = treble.clamp(-12, 12);
+    bass = bass.clamp(-12, 12);
+
+    return [signedToUnsigned(bass), signedToUnsigned(treble)];
+  }
+}
+
+class SXiAudioToneGenerateCommand extends SXiPayload {
+  int frequencyHz;
+  AudioLeftRightType leftRight;
+  AudioAlertType alert;
+  int volume;
+
+  SXiAudioToneGenerateCommand(
+      this.frequencyHz, this.leftRight, this.alert, this.volume)
+      : super(0x01, 0x80, 0);
+
+  @override
+  List<int> getParameters() {
+    int freqParam = frequencyHz ~/ 100;
+    freqParam = freqParam.clamp(1, 200);
+
+    int flags = leftRight.value | alert.value;
+
+    int vol = volume;
+    vol = vol.clamp(-26, 16);
+
+    return [freqParam, flags, signedToUnsigned(vol)];
+  }
+}
+
 class SXiMonitorSeekCommand extends SXiPayload {
   SeekMonitorType seekMonitorID;
   MonitorChangeType monitorChangeType;
@@ -540,14 +580,31 @@ class SXiPingCommand extends SXiPayload {
   }
 }
 
-class SXiDebugModeCommand extends SXiPayload {
-  bool enabled;
+class SXiDebugCommand extends SXiPayload {
+  final int b0;
+  final int b1;
+  final int b2;
+  final int b3;
 
-  SXiDebugModeCommand(this.enabled) : super(0x0F, 0x09, 0);
+  SXiDebugCommand({int b0 = 0, int b1 = 0, int b2 = 0, int b3 = 0})
+      : b0 = b0 & 0xFF,
+        b1 = b1 & 0xFF,
+        b2 = b2 & 0xFF,
+        b3 = b3 & 0xFF,
+        super(0x0F, 0x09, 0);
 
   @override
   List<int> getParameters() {
-    return [enabled ? 1 : 0];
+    return [b0, b1, b2, b3];
+  }
+}
+
+class SXiDebugResetCommand extends SXiPayload {
+  SXiDebugResetCommand() : super(0x0F, 0x00, 0);
+
+  @override
+  List<int> getParameters() {
+    return [0x00, 0x00];
   }
 }
 
@@ -626,12 +683,137 @@ class SXiDebugWriteBytesCommand extends SXiPayload {
   }
 }
 
+class SXiDebugWriteWordsCommand extends SXiPayload {
+  final int bank;
+  final int address;
+  final List<int> words;
+
+  static const int _widthType = 1;
+
+  SXiDebugWriteWordsCommand({
+    required this.bank,
+    required this.address,
+    required List<int> words,
+  })  : words = List<int>.from(words.map((v) => v & 0xFFFF)),
+        super(0x0F, 0x03, 0);
+
+  @override
+  List<int> getParameters() {
+    final int length = words.length & 0xFFFF;
+    final List<int> encoded = <int>[];
+    for (final w in words) {
+      encoded.add((w >> 8) & 0xFF);
+      encoded.add(w & 0xFF);
+    }
+    return [
+      bank & 0xFF,
+      _widthType & 0xFF,
+      (address >> 24) & 0xFF,
+      (address >> 16) & 0xFF,
+      (address >> 8) & 0xFF,
+      address & 0xFF,
+      (length >> 8) & 0xFF,
+      length & 0xFF,
+      _widthType & 0xFF,
+      ...encoded,
+    ];
+  }
+}
+
+class SXiDebugWriteDWordsCommand extends SXiPayload {
+  final int bank;
+  final int address;
+  final List<int> dwords;
+
+  static const int _widthType = 2;
+
+  SXiDebugWriteDWordsCommand({
+    required this.bank,
+    required this.address,
+    required List<int> dwords,
+  })  : dwords = List<int>.from(dwords.map((v) => v & 0xFFFFFFFF)),
+        super(0x0F, 0x03, 0);
+
+  @override
+  List<int> getParameters() {
+    final int length = dwords.length & 0xFFFF;
+    final List<int> encoded = <int>[];
+    for (final v in dwords) {
+      encoded.add((v >> 24) & 0xFF);
+      encoded.add((v >> 16) & 0xFF);
+      encoded.add((v >> 8) & 0xFF);
+      encoded.add(v & 0xFF);
+    }
+    return [
+      bank & 0xFF,
+      _widthType & 0xFF,
+      (address >> 24) & 0xFF,
+      (address >> 16) & 0xFF,
+      (address >> 8) & 0xFF,
+      address & 0xFF,
+      (length >> 8) & 0xFF,
+      length & 0xFF,
+      _widthType & 0xFF,
+      ...encoded,
+    ];
+  }
+}
+
+class SXiDebugTunnelCommand extends SXiPayload {
+  final int bank;
+  final List<int> data;
+
+  SXiDebugTunnelCommand({int bank = 0, required List<int> data})
+      : bank = bank & 0xFF,
+        data = List<int>.from(data.map((b) => b & 0xFF)),
+        super(0x0F, 0x07, 0);
+
+  @override
+  List<int> getParameters() {
+    final int len = data.length & 0xFFFF;
+    return [
+      bank,
+      (len >> 8) & 0xFF,
+      len & 0xFF,
+      ...data,
+    ];
+  }
+}
+
+class SXiDebugActivateCommand extends SXiPayload {
+  final int id;
+  final int param;
+  final String name;
+  final int reserved;
+
+  SXiDebugActivateCommand({
+    required int id,
+    required int param,
+    required this.name,
+    int reserved = 0,
+  })  : id = id & 0xFF,
+        param = param & 0xFFFF,
+        reserved = reserved & 0xFF,
+        super(0x0E, 0xC0, 0);
+
+  @override
+  List<int> getParameters() {
+    final List<int> s = name.codeUnits + [0x00];
+    return [
+      id,
+      reserved,
+      (param >> 8) & 0xFF,
+      param & 0xFF,
+      ...s,
+    ];
+  }
+}
+
 class SXiDebugUnmonitorCommand extends SXiPayload {
   SXiDebugUnmonitorCommand() : super(0x0F, 0x05, 0);
 
   @override
   List<int> getParameters() {
-    // Most debug control commands encode an extra zero byte
-    return [0x00];
+    return [0x00, 0x00];
   }
 }

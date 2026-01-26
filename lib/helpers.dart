@@ -113,6 +113,14 @@ int signedToUnsigned(int signedByte) {
   return signedByte & 0xFF;
 }
 
+// Convert an unsigned integer to a signed integer
+int unsignedToSignedInt(int v, int bits) {
+  final int mask = (1 << bits) - 1;
+  v &= mask;
+  final int signBit = 1 << (bits - 1);
+  return (v ^ signBit) - signBit;
+}
+
 // Convert a list of bytes to a 32-bit integer
 int bytesToInt32(List<int> bytes) {
   if (bytes.length != 4) {

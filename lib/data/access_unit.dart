@@ -17,6 +17,17 @@ class AccessUnit {
     return header + data;
   }
 
+  factory AccessUnit.fromBytes(List<int> bytes) {
+    final List<int> header = bytes.sublist(0, 4);
+    final List<int> auData = bytes.sublist(4, bytes.length - 4);
+    final int crc = (bytes[bytes.length - 4] << 24) |
+        (bytes[bytes.length - 3] << 16) |
+        (bytes[bytes.length - 2] << 8) |
+        bytes[bytes.length - 1];
+
+    return AccessUnit(header: header, data: auData, crc: crc);
+  }
+
   factory AccessUnit.fromSDTPPackets(List<SDTPPacket> packets) {
     if (packets.isEmpty) {
       throw ArgumentError('Cannot create an Access Unit from empty packets.');
@@ -49,6 +60,10 @@ class AccessUnit {
         crcStart > 4 ? concatenated.sublist(4, crcStart) : const <int>[];
 
     return AccessUnit(header: header, data: auData, crc: crc);
+  }
+
+  List<int> toBytes() {
+    return header + data + [crc];
   }
 }
 

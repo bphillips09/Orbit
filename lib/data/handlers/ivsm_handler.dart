@@ -54,7 +54,8 @@ class IvsmAckType {
 
 // IVSM Handler
 class IVSMHandler extends DSIHandler {
-  IVSMHandler(SXiLayer sxiLayer) : super(DataServiceIdentifier.ivsm, sxiLayer);
+  IVSMHandler(SXiLayer sxiLayer)
+      : super(DataServiceIdentifier.inVehicleSubscriptionMessaging, sxiLayer);
 
   int? _debugIvsmPrefix20;
   int? _debugIvsmSuffix16;

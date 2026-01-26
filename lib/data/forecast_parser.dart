@@ -29,6 +29,11 @@ class ForecastRecord {
     this.pollen,
     this.extras = const <String, int>{},
   });
+
+  @override
+  String toString() {
+    return 'ForecastRecord(stateId: $stateId, locId: $locId, eventCode: $eventCode, tempMin: $tempMin, tempCur: $tempCur, tempMax: $tempMax, cloud: $cloud, uv: $uv, airq: $airq, pollen: $pollen, extras: $extras)';
+  }
 }
 
 // Parse one forecast record for a specific state and location

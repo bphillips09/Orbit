@@ -42,6 +42,21 @@ enum AudioMuteType {
   }
 }
 
+enum AudioLeftRightType {
+  none(0),
+  right(1),
+  left(2),
+  both(3);
+
+  const AudioLeftRightType(this.value);
+  final int value;
+
+  static AudioLeftRightType getByValue(int i) {
+    return AudioLeftRightType.values.firstWhere((x) => x.value == i,
+        orElse: () => throw ArgumentError('Invalid value: $i'));
+  }
+}
+
 enum AudioExciterType {
   disable(0),
   enable(1);
@@ -51,6 +66,20 @@ enum AudioExciterType {
 
   static AudioExciterType getByValue(int i) {
     return AudioExciterType.values.firstWhere((x) => x.value == i,
+        orElse: () => throw ArgumentError('Invalid value: $i'));
+  }
+}
+
+enum AudioAlertType {
+  none(0),
+  alert1(4),
+  alert2(8);
+
+  const AudioAlertType(this.value);
+  final int value;
+
+  static AudioAlertType getByValue(int i) {
+    return AudioAlertType.values.firstWhere((x) => x.value == i,
         orElse: () => throw ArgumentError('Invalid value: $i'));
   }
 }
@@ -194,7 +223,16 @@ enum StatusMonitorType {
   gpsData(0x10),
   linkInformation(0x11),
   scanAvailableItems(0x12),
-  audioPresence(0x13);
+  audioPresence(0x13),
+  debugDecoder(0x34),
+  debugOffset(0x35),
+  debugPipe(0x36),
+  debugDataLayer(0x37),
+  debugQueue(0x39),
+  debugMfc(0x3a),
+  debugAudioDecoder(0x3b),
+  debugUpc(0x3c),
+  debugQuality(0x3d);
 
   const StatusMonitorType(this.value);
   final int value;
@@ -400,7 +438,7 @@ enum GlobalMetadataIdentifier {
   }
 }
 
-class Overrides {
+class ChannelAttributes {
   static const int freeToAir = 1 << 0;
   static const int locked = 1 << 1;
   static const int mature = 1 << 2;
@@ -408,4 +446,28 @@ class Overrides {
   static const int unrestricted = 1 << 4;
   static const int unsubscribed = 1 << 5;
   static int all() => freeToAir | locked | mature | skipped | unrestricted;
+
+  static const Map<int, String> _names = <int, String>{
+    freeToAir: 'freeToAir',
+    locked: 'locked',
+    mature: 'mature',
+    skipped: 'skipped',
+    unrestricted: 'unrestricted',
+    unsubscribed: 'unsubscribed',
+  };
+
+  static String? nameOf(int value) => _names[value];
+
+  static List<String> namesFromMask(int mask) {
+    final List<String> result = <String>[];
+    _names.forEach((int bit, String name) {
+      if ((mask & bit) != 0) {
+        result.add(name);
+      }
+    });
+    return result;
+  }
+
+  static bool contains(int mask, int attributeBit) =>
+      (mask & attributeBit) != 0;
 }
