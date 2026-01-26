@@ -272,7 +272,9 @@ class SXiLayer {
         appState.addChannel(sid, chan,
             String.fromCharCodes(channelInfo.chanNameLong), channelInfo.catID);
         logger.t(
-            "Update Station: Channel: $chan, SID: $sid, Name: ${String.fromCharCodes(channelInfo.chanNameLong)} - ${channelInfo.chanAttributes} - ${channelInfo.indCode} - ${channelInfo.recordRestrictions}");
+            "Update Station: Channel: $chan, SID: $sid, Name: ${String.fromCharCodes(channelInfo.chanNameLong)}"
+            " - ${ChannelAttributes.namesFromMask(channelInfo.chanAttributes)} - ${IndicationCode.getByValue(channelInfo.indCode)}"
+            " - ${channelInfo.recordRestrictions}");
         break;
 
       case SXiSelectChannelIndication channelSelect:
@@ -511,6 +513,7 @@ class SXiLayer {
           case StatusMonitorType.gpsData:
           case StatusMonitorType.linkInformation:
           case StatusMonitorType.scanAvailableItems:
+          default:
             String statusUpdateString = """<----- STATUS UPDATE BEGIN ----->\n
             Monitor Type: ${monitorType.name}
             Indication: ${IndicationCode.getByValue(statusUpdate.indCode)}
@@ -637,7 +640,7 @@ class SXiLayer {
             '\n(Package) OL Post UPC: $olPostUpc'
             '\n(Package) OL Disp UPC: $olDispUpc'
             '\n<----- PACKAGE END ----->';
-        logger.t(packageString);
+        logger.d(packageString);
         break;
 
       case SXiDataPacketIndication dataPayload:

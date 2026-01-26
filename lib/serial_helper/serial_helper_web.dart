@@ -22,7 +22,7 @@ class WebSerialHelper implements SerialHelper {
 
   @override
   Future<bool> openPort(Object? port, int baud) async {
-    logger.i('Opening port on Web at $baud baud');
+    logger.i('Opening port (${port ?? "none"}) on Web at $baud baud');
 
     try {
       if (_serialPort == null) {
