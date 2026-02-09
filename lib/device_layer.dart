@@ -16,7 +16,7 @@ import 'package:orbit/debug_tools_stub.dart'
 
 class DeviceLayer {
   // Handshake and heartbeat timing
-  static const Duration deviceResponseTimeout = Duration(seconds: 3);
+  static const Duration deviceResponseTimeout = Duration(seconds: 10);
   static const Duration heartbeatInterval = Duration(seconds: 2);
   static const Duration heartbeatStaleThreshold = Duration(seconds: 10);
   // Buffer management
@@ -24,6 +24,7 @@ class DeviceLayer {
 
   final int baudRate;
   final Object port;
+  final SerialTransport transport;
   final SXiLayer _sxiLayer;
   final StreamController<DeviceMessage> _receiveController =
       StreamController<DeviceMessage>.broadcast();
@@ -40,13 +41,19 @@ class DeviceLayer {
   Uint8List _buffer = Uint8List(0);
   Timer? _heartbeatMonitorTimer;
   DateTime? _lastValidMessage;
+  Timer? _networkInitRetryTimer;
 
-  DeviceLayer(this._sxiLayer, this.port, this.baudRate,
-      {this.systemConfiguration,
-      this.onMessage,
-      this.onError,
-      this.onConnectionDetailChanged,
-      this.onClearMessages});
+  DeviceLayer(
+    this._sxiLayer,
+    this.port,
+    this.baudRate, {
+    this.transport = SerialTransport.serial,
+    this.systemConfiguration,
+    this.onMessage,
+    this.onError,
+    this.onConnectionDetailChanged,
+    this.onClearMessages,
+  });
 
   // Read-only stream of device messages
   Stream<DeviceMessage> get messageStream => _receiveController.stream;
@@ -63,15 +70,69 @@ class DeviceLayer {
 
     _updateConnectionDetail('Starting...');
 
-    // If the device is not booted, we have to connect at 57600 baud
-    if (await _attemptInitializationAtBaudRate(57600)) {
-      return await _finalizeConnection();
-    }
+    if (!_isNetworkPort()) {
+      // If the device has not initialized, we have to connect at 57600 baud
+      if (await _attemptInitializationAtBaudRate(57600)) {
+        return await _finalizeConnection();
+      }
 
-    // If the device is booted, we can connect at any other baud rate
-    final int desiredSecondaryBaud = _sxiLayer.appState.secondaryBaudRate;
-    if (await _attemptConnectionAtBaudRate(desiredSecondaryBaud)) {
-      return await _finalizeConnection(anyDeviceMessage: true);
+      // If the device has initialized, we can connect at any other supported baud
+      final int desiredSecondaryBaud = _sxiLayer.appState.secondaryBaudRate;
+      if (await _attemptConnectionAtBaudRate(desiredSecondaryBaud)) {
+        return await _finalizeConnection(anyDeviceMessage: true);
+      }
+    } else {
+      // For UART-over-IP, open once at the network init baud (57600)
+      const int networkInitBaud = 57600;
+      _updateConnectionDetail('Connecting over network...');
+      if (!await _serialHelper.openPort(
+        port,
+        networkInitBaud,
+        transport: transport,
+      )) {
+        onError?.call('Failed to open $port at $baudRate baud', false);
+        return false;
+      }
+
+      _serialHelper.readData(_processData, (error, expectedClosure) {
+        if (!expectedClosure) {
+          _initialized = false;
+          onError?.call(error.toString(), true);
+          _stopHeartbeatMonitor();
+        }
+      });
+
+      // Issue a second CONFIG to the UART-over-IP backend
+      try {
+        final dynamic helper = _serialHelper;
+        final ok = await helper.configureNetworkUartBaud(57600);
+        logger.i('Network UART CONFIG result: $ok');
+      } catch (_) {}
+
+      // Send init and retry at 500ms intervals until any response arrives
+      await sendInitPayload();
+      logger.i('Waiting for device response...');
+      _networkInitRetryTimer?.cancel();
+      _networkInitRetryTimer =
+          Timer.periodic(const Duration(milliseconds: 500), (_) async {
+        try {
+          await sendInitPayload();
+        } catch (_) {}
+      });
+
+      final gotResponse = await _waitForMessage(anyDeviceMessage: true);
+      _networkInitRetryTimer?.cancel();
+      _networkInitRetryTimer = null;
+
+      if (gotResponse) {
+        // Switch backend UART to the desired secondary baud
+        await _switchNetworkBackendBaudIfNeeded();
+        return await _finalizeConnection(anyDeviceMessage: true);
+      }
+
+      onError?.call('Device did not respond in time.', false);
+      await _serialHelper.closePort();
+      return false;
     }
 
     onError?.call('Failed to Connect to Device', true);
@@ -79,11 +140,33 @@ class DeviceLayer {
     return false;
   }
 
+  bool _isNetworkPort() {
+    return transport == SerialTransport.network;
+  }
+
+  Future<void> _switchNetworkBackendBaudIfNeeded() async {
+    try {
+      if (!_isNetworkPort()) return;
+
+      final int desiredSecondaryBaud = _sxiLayer.appState.secondaryBaudRate;
+      if (desiredSecondaryBaud == 57600) return;
+      final dynamic helper = _serialHelper;
+      final bool ok =
+          await helper.configureNetworkUartBaud(desiredSecondaryBaud);
+      logger.i('Network UART CONFIG to $desiredSecondaryBaud result: $ok');
+      if (ok) {
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+    } catch (e) {
+      logger.w('Failed to switch network backend baud: $e');
+    }
+  }
+
   // Attempt to initialize the device at a given baud rate
   Future<bool> _attemptInitializationAtBaudRate(int baudRate) async {
     _updateConnectionDetail('Initializing...');
 
-    if (!await _serialHelper.openPort(port, baudRate)) {
+    if (!await _serialHelper.openPort(port, baudRate, transport: transport)) {
       onError?.call('Failed to open $port at $baudRate baud', false);
       return false;
     }
@@ -116,7 +199,7 @@ class DeviceLayer {
     _updateConnectionDetail(
         'Starting secondary connection at $baudRate baud...');
 
-    if (!await _serialHelper.openPort(port, baudRate)) {
+    if (!await _serialHelper.openPort(port, baudRate, transport: transport)) {
       onError?.call('Failed to open $port at $baudRate baud', false);
       return false;
     }
@@ -141,9 +224,11 @@ class DeviceLayer {
   // Finalize the connection
   Future<bool> _finalizeConnection({bool anyDeviceMessage = false}) async {
     _updateConnectionDetail('Finalizing Connection...');
-
-    if (!await _waitForMessage(anyDeviceMessage: anyDeviceMessage)) {
-      return false;
+    // If we've already received a device message, don't wait again
+    if (!anyDeviceMessage) {
+      if (!await _waitForMessage(anyDeviceMessage: false)) {
+        return false;
+      }
     }
 
     // Send the config payload, which finishes the boot-up sequence
@@ -184,6 +269,7 @@ class DeviceLayer {
           message.isInitMessage() ||
           message.payload.runtimeType == HeartbeatPayload) {
         // Heartbeat received, now we're just waiting for playback info
+        logger.i('First device response: $message');
         _updateConnectionDetail('Loading Data...', title: 'Connected');
         _initialized = true;
         _lastValidMessage = DateTime.now();
@@ -227,83 +313,84 @@ class DeviceLayer {
       // We write the raw RX chunk; complete frames are logged below
       FrameTracer.instance.logRxFrame(data);
     }
+
+    // Treat any received bytes as heartbeat
+    _lastValidMessage = DateTime.now();
     _buffer = Uint8List.fromList(_buffer + data);
 
     // Limit the buffer size to prevent overflow
     if (_buffer.length > maxRxBufferBytes) {
       logger.w('Buffer too large, resetting.');
+      logger.i('Buffer: ${_buffer.length} bytes');
+      logger.i('Buffer Sample: ${_buffer.take(50).toList()}');
       _buffer = Uint8List(0);
       return;
     }
 
     while (_buffer.length >= 8) {
-      if (_buffer[0] == 0xDE && _buffer[1] == 0xC6) {
-        // Frame Checking Step 1: Sync bytes matched
-        if (_buffer.length >= 6) {
-          final payloadLength = bitCombine(_buffer[4], _buffer[5]);
-          final frameLength = 8 + payloadLength;
-
-          if (_buffer.length >= frameLength) {
-            // Frame Checking Step 2: Extract the full frame
-            final frame = _buffer.sublist(0, frameLength);
-            if (FrameTracer.instance.isEnabled) {
-              // Log parsed RX frame
-              FrameTracer.instance.logRxFrame(frame);
-            }
-
-            // Frame Checking Step 3: Validate checksum and process frame
-            if (validateChecksum(frame)) {
-              try {
-                final message = DeviceMessage.fromBytes(frame);
-                _receiveController.add(message);
-
-                if (message.payload.runtimeType ==
-                        SXiSubscriptionStatusIndication ||
-                    message.payload.runtimeType ==
-                        SXiAuthenticationIndication) {
-                  logger.d(
-                      'Subscription/auth status indication: ${message.payload.toBytes().map((e) => e.toRadixString(16)).join(' ')}');
-                }
-
-                _highestReceivedSequence = message.sequence;
-                _sxiLayer.processMessage(message);
-
-                _lastValidMessage = DateTime.now();
-              } catch (e) {
-                logger.w('Error parsing DeviceMessage: $e');
-                logger.d('Frame (first 30 bytes): ${frame.take(30).toList()}');
-                forceAck(frame[6], frame[7], frame[8], frame[2], frame);
-              }
-            } else {
-              logger.d(
-                  'Checksum failure; first 30 bytes: ${frame.take(30).toList()}');
-            }
-
-            // Frame Checking Step 4: Truncate buffer to remove processed frame
-            _buffer = _buffer.sublist(frameLength);
-          } else {
-            // Frame is incomplete, wait for more data
+      if (!(_buffer[0] == 0xDE && _buffer[1] == 0xC6)) {
+        // Resync to next sync marker if present, otherwise drop one byte
+        int next = -1;
+        for (int i = 1; i + 1 < _buffer.length; i++) {
+          if (_buffer[i] == 0xDE && _buffer[i + 1] == 0xC6) {
+            next = i;
             break;
           }
-        } else {
-          // Header is incomplete, wait for more data
-          break;
         }
-      } else {
-        // Invalid sync bytes, discard until the next possible sync sequence
-        // This sometimes works, sometimes doesn't
-        final nextSyncIndex = _buffer.indexOf(0xDE, 1);
-        if (nextSyncIndex != -1 &&
-            nextSyncIndex + 1 < _buffer.length &&
-            _buffer[nextSyncIndex + 1] == 0xC6) {
-          _buffer =
-              _buffer.sublist(nextSyncIndex); // Truncate to next sync bytes
-        } else {
-          logger.d('Invalid sync bytes, clearing buffer.');
-          _buffer = Uint8List(0); // Clear buffer if no valid sync bytes found
+        _buffer = next >= 0 ? _buffer.sublist(next) : _buffer.sublist(1);
+        continue;
+      }
+
+      // Drop leading two bytes if we see duplicate sync right after sync
+      if (_buffer.length >= 4 && _buffer[2] == 0xDE && _buffer[3] == 0xC6) {
+        _buffer = _buffer.sublist(2);
+        continue;
+      }
+
+      if (_buffer.length < 6) break; // Wait for header
+
+      final payloadLength = bitCombine(_buffer[4], _buffer[5]);
+      // Frame length is always header(6) + payload(len) + checksum(2) = 8 + len
+      final frameLength = 8 + payloadLength;
+      if (_buffer.length < frameLength) break;
+
+      final frame = _buffer.sublist(0, frameLength);
+      if (FrameTracer.instance.isEnabled) {
+        FrameTracer.instance.logRxFrame(frame);
+      }
+
+      if (validateChecksum(frame)) {
+        try {
+          final message = DeviceMessage.fromBytes(frame);
+          _receiveController.add(message);
+
+          if (message.payload.runtimeType == SXiSubscriptionStatusIndication ||
+              message.payload.runtimeType == SXiAuthenticationIndication) {
+            logger.d(
+                'Subscription/auth status indication: ${message.payload.toBytes().map((e) => e.toRadixString(16)).join(' ')}');
+          }
+
+          _highestReceivedSequence = message.sequence;
+          _sxiLayer.processMessage(message);
+          _lastValidMessage = DateTime.now();
+        } catch (e) {
+          logger.w('Error parsing DeviceMessage: $e');
+          logger.d('Frame Sample: ${frame.take(30).toList()}');
+          forceAck(frame[6], frame[7], frame[8], frame[2], frame);
+        }
+        _buffer = _buffer.sublist(frameLength);
+        continue;
+      }
+
+      // Resync to next sync marker if checksum fails, otherwise drop one byte
+      int nextSync = -1;
+      for (int i = 1; i + 1 < frameLength && i + 1 < _buffer.length; i++) {
+        if (_buffer[i] == 0xDE && _buffer[i + 1] == 0xC6) {
+          nextSync = i;
           break;
         }
       }
+      _buffer = nextSync >= 0 ? _buffer.sublist(nextSync) : _buffer.sublist(1);
     }
   }
 
@@ -562,7 +649,7 @@ class DeviceLayer {
           ChanAttribListChangeType.tuneMix1, presets),
       // Tune to default SID
       SXiSelectChannelCommand(ChanSelectionType.tuneUsingSID, defaultSid, 1,
-          Overrides.all(), AudioRoutingType.routeToAudio),
+          ChannelAttributes.all(), AudioRoutingType.routeToAudio),
       // Set EQ band gain
       SXiAudioEqualizerCommand(eq),
       // Set volume
@@ -691,9 +778,11 @@ class DeviceLayer {
 
     _updateConnectionDetail('Opening new connection at $newBaudRate...');
     if (kIsWeb || kIsWasm) {
-      portOpened = await _serialHelper.openPort(port, newBaudRate);
+      portOpened =
+          await _serialHelper.openPort(port, newBaudRate, transport: transport);
     } else {
-      portOpened = await _serialHelper.openPort(port, newBaudRate);
+      portOpened =
+          await _serialHelper.openPort(port, newBaudRate, transport: transport);
     }
     if (portOpened) {
       _serialHelper.readData(_processData, (error, expectedClosure) {

@@ -21,7 +21,15 @@ class WebSerialHelper implements SerialHelper {
   }
 
   @override
-  Future<bool> openPort(Object? port, int baud) async {
+  Future<bool> openPort(
+    Object? port,
+    int baud, {
+    SerialTransport transport = SerialTransport.serial,
+  }) async {
+    if (transport == SerialTransport.network) {
+      logger.w('Network transport is not supported on Web');
+      return false;
+    }
     logger.i('Opening port (${port ?? "none"}) on Web at $baud baud');
 
     try {

@@ -75,6 +75,7 @@ class StorageData {
         break;
       case SaveDataType.lastSid:
       case SaveDataType.lastPort:
+      case SaveDataType.lastPortTransport:
       case SaveDataType.lastAudioDevice:
       case SaveDataType.audioOutputRoute:
       case SaveDataType.enableAudio:
@@ -130,6 +131,7 @@ class StorageData {
             .toList();
       case SaveDataType.lastSid:
       case SaveDataType.lastPort:
+      case SaveDataType.lastPortTransport:
       case SaveDataType.lastAudioDevice:
       case SaveDataType.audioOutputRoute:
       case SaveDataType.enableAudio:
@@ -261,6 +263,7 @@ enum SaveDataType {
   favorites,
   lastSid,
   lastPort,
+  lastPortTransport,
   lastAudioDevice,
   audioOutputRoute,
   enableAudio,
