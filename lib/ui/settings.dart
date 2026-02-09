@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:open_file/open_file.dart';
 import 'package:orbit/data/handlers/channel_graphics_handler.dart';
+import 'package:orbit/serial_helper/serial_helper_interface.dart';
+import 'package:orbit/ui/connection_dialogs.dart';
 import 'package:orbit/ui/epg_schedule_view.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +19,7 @@ import 'package:orbit/ui/presets_editor.dart';
 import 'package:orbit/ui/favorites_manager.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/signal_bar.dart';
+import 'package:orbit/ui/streaming_beta.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/sxi_indication_types.dart';
@@ -32,7 +35,7 @@ class SettingsPage extends StatelessWidget {
     'Radio': GlobalKey<_CollapsibleSectionState>(),
     'Appearance': GlobalKey<_CollapsibleSectionState>(),
     'Connection': GlobalKey<_CollapsibleSectionState>(),
-    'Equalizer': GlobalKey<_CollapsibleSectionState>(),
+    'Hardware Equalizer': GlobalKey<_CollapsibleSectionState>(),
     'Audio': GlobalKey<_CollapsibleSectionState>(),
     'System Info': GlobalKey<_CollapsibleSectionState>(),
     'Data': GlobalKey<_CollapsibleSectionState>(),
@@ -194,12 +197,47 @@ class SettingsPage extends StatelessWidget {
                   'Select communication port',
                   Icons.settings_input_svideo,
                   onTap: () async {
-                    // Let MainPage handle port selection
-                    var (portString, portObject) =
-                        await mainPage.selectAPort('', null, canDismiss: true);
+                    final SerialTransport? transport =
+                        await ConnectionDialogs.showConnectionType(
+                      context,
+                      barrierDismissible: true,
+                    );
+                    if (!context.mounted) return;
+                    if (transport == null) return;
 
-                    // If nothing was selected (user cancelled), cancel
-                    if (portString.isEmpty && portObject == null) {
+                    String portString = '';
+                    Object? portObject;
+
+                    if (transport == SerialTransport.serial) {
+                      var res = await ConnectionDialogs.selectSerialPort(
+                        context,
+                        serialHelper: mainPage.serialHelper,
+                        storageData: mainPage.appState.storageData,
+                        canDismiss: true,
+                      );
+                      if (!context.mounted) return;
+                      portString = res.$1;
+                      portObject = res.$2;
+                      if (portString.isEmpty && portObject == null) return;
+                    } else if (transport == SerialTransport.network &&
+                        !kIsWeb &&
+                        !kIsWasm) {
+                      final String? spec =
+                          await ConnectionDialogs.showNetworkConfig(
+                        context,
+                      );
+                      if (!context.mounted) return;
+                      if (spec == null || spec.isEmpty) return;
+                      portString = spec;
+                      portObject = null;
+
+                      await mainPage.appState.storageData
+                          .save(SaveDataType.lastPort, portString);
+                      await mainPage.appState.storageData.save(
+                        SaveDataType.lastPortTransport,
+                        SerialTransport.network.name,
+                      );
+                    } else {
                       return;
                     }
 
@@ -207,11 +245,22 @@ class SettingsPage extends StatelessWidget {
                     try {
                       await mainPage.deviceLayer.close();
                     } catch (_) {}
+                    if (!context.mounted) return;
+
+                    final bool startupGate = mainPage.isStartupGateVisible;
+                    if (startupGate && context.mounted) {
+                      Navigator.of(context).pop();
+                    }
 
                     // Attempt to reconnect using the chosen port
-                    final success =
-                        await mainPage.tryStartup(portString, portObject);
-                    if (context.mounted) {
+                    final success = await mainPage.connectToPort(
+                      portString,
+                      portObject,
+                      transport: transport,
+                    );
+                    if (!context.mounted) return;
+
+                    if (!startupGate && context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                         content: Text(success
                             ? 'Connected to device.'
@@ -238,7 +287,7 @@ class SettingsPage extends StatelessWidget {
               Icons.volume_up,
               [
                 _CollapsibleSection(
-                  title: 'Equalizer',
+                  title: 'Hardware Equalizer',
                   icon: Icons.tune,
                   initiallyExpanded: false,
                   isSubsection: true,
@@ -395,6 +444,22 @@ class SettingsPage extends StatelessWidget {
                   },
                 ),
                 if (appState.debugMode) ...[
+                  _buildSettingTile(
+                    context,
+                    'Streaming (Beta)',
+                    'Test internet streaming functionality',
+                    Icons.wifi_tethering,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => StreamingBetaPage(
+                            deviceLayer: mainPage.deviceLayer,
+                            appState: appState,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                   _buildSwitchTile(
                     context,
                     'Device-layer Frame Trace',
@@ -437,11 +502,71 @@ class SettingsPage extends StatelessWidget {
                   ),
                   _buildSettingTile(
                     context,
-                    'Play Test Tone',
-                    '440 Hz for 5s',
+                    'Play Test Tone (software)',
+                    'Software-generated 440 Hz for 3s',
                     Icons.volume_up,
                     onTap: () {
-                      mainPage.audioController.playTestTone(440, 5);
+                      mainPage.audioController.playTestTone(440, 3);
+                    },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Play Test Tone (hardware)',
+                    'Continuously hardware-generated 440 Hz',
+                    Icons.volume_up,
+                    onTap: () {
+                      final cmd = SXiAudioToneGenerateCommand(
+                        440,
+                        AudioLeftRightType.both,
+                        AudioAlertType.none,
+                        -26,
+                      );
+                      mainPage.deviceLayer.sendControlCommand(cmd);
+                    },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Stop Test Tone (hardware)',
+                    'Stop hardware-generated tone',
+                    Icons.volume_up,
+                    onTap: () {
+                      final cmd = SXiAudioToneGenerateCommand(
+                        440,
+                        AudioLeftRightType.none,
+                        AudioAlertType.none,
+                        0,
+                      );
+                      mainPage.deviceLayer.sendControlCommand(cmd);
+                    },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Play Test Alert 1 (hardware)',
+                    'Hardware-generated alert tone',
+                    Icons.volume_up,
+                    onTap: () {
+                      final cmd = SXiAudioToneGenerateCommand(
+                        0,
+                        AudioLeftRightType.none,
+                        AudioAlertType.alert1,
+                        0,
+                      );
+                      mainPage.deviceLayer.sendControlCommand(cmd);
+                    },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Play Test Alert 2 (hardware)',
+                    'Hardware-generated alert tone',
+                    Icons.volume_up,
+                    onTap: () {
+                      final cmd = SXiAudioToneGenerateCommand(
+                        0,
+                        AudioLeftRightType.none,
+                        AudioAlertType.alert2,
+                        0,
+                      );
+                      mainPage.deviceLayer.sendControlCommand(cmd);
                     },
                   ),
                   _buildSettingTile(
@@ -487,6 +612,39 @@ class SettingsPage extends StatelessWidget {
                     },
                   ),
                   _buildSettingTile(
+                      context,
+                      'Monitor All Data Services',
+                      'Monitor all data services (this will take a few seconds)',
+                      Icons.monitor, onTap: () async {
+                    for (var val in DataServiceIdentifier.values) {
+                      if (val != DataServiceIdentifier.none) {
+                        mainPage.deviceLayer.sendControlCommand(
+                            SXiMonitorDataServiceCommand(
+                                DataServiceMonitorUpdateType
+                                    .startMonitorForService,
+                                val));
+                        await Future.delayed(const Duration(milliseconds: 500));
+                      }
+                    }
+                  }),
+                  _buildSettingTile(
+                    context,
+                    'Clear Radar Data',
+                    'Delete saved radar tiles and raw dumps',
+                    Icons.delete_sweep,
+                    onTap: () async {
+                      final appState =
+                          Provider.of<AppState>(context, listen: false);
+                      appState.clearRadarOverlays();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('Cleared radar data.'),
+                          duration: const Duration(seconds: 2),
+                        ));
+                      }
+                    },
+                  ),
+                  _buildSettingTile(
                     context,
                     'Stop Monitoring Data Services',
                     'Stop monitoring data services',
@@ -507,6 +665,31 @@ class SettingsPage extends StatelessWidget {
                     onTap: () =>
                         EpgScheduleDialog.show(context, mainPage.sxiLayer),
                   ),
+                  _buildSettingTile(context, 'Auth State',
+                      'Log the auth status', Icons.security,
+                      onTap: () => {
+                            mainPage.deviceLayer.sendControlCommand(
+                                SXiDeviceAuthenticationCommand())
+                          }),
+                  _buildSettingTile(context, 'Package Report',
+                      'Log the active package report', Icons.report,
+                      onTap: () => {
+                            mainPage.deviceLayer.sendControlCommand(
+                                SXiPackageCommand(PackageOptionType.report, 1))
+                          }),
+                  _buildSettingTile(context, 'Package Query',
+                      'Log the active package query', Icons.query_stats,
+                      onTap: () => {
+                            mainPage.deviceLayer.sendControlCommand(
+                                SXiPackageCommand(PackageOptionType.query, 1))
+                          }),
+                  _buildSettingTile(context, 'Package Validate',
+                      'Log the active package validation', Icons.check,
+                      onTap: () => {
+                            mainPage.deviceLayer.sendControlCommand(
+                                SXiPackageCommand(
+                                    PackageOptionType.validate, 1))
+                          }),
                 ],
               ],
             ),

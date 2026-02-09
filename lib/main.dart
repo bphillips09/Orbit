@@ -1,12 +1,12 @@
 // Main app class
 import 'dart:async';
 import 'dart:ui';
+import 'dart:typed_data';
 import 'package:orbit/telemetry/telemetry.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:orbit/data/favorite.dart';
 import 'package:provider/provider.dart';
@@ -38,6 +38,7 @@ import 'package:orbit/ui/unsupported_browser_app.dart';
 import 'package:orbit/ui/favorite_dialog.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/welcome_dialog.dart';
+import 'package:orbit/ui/connection_dialogs.dart';
 
 // Audio service handler
 AudioServiceHandler? audioServiceHandler;
@@ -172,7 +173,13 @@ class MainPageState extends State<MainPage> {
   TrackSnapInfo? currentSnapInfo;
   GlobalKey sliderKey = GlobalKey();
   bool _isLoading = true;
-  bool _autoRetryAttempted = false;
+  bool _startupInProgress = false;
+  bool _suppressFatalConnectionDialogs = false;
+  String? _lastStartupConnectionError;
+  bool _deviceConnected = false;
+  bool _startupGateVisible = false;
+  String _startupGateMessage = '';
+  bool _startupCompleted = false;
   bool initiatedPlayback = false;
   bool _audioServiceInitialized = false;
   String _connectionDetails = '';
@@ -209,6 +216,22 @@ class MainPageState extends State<MainPage> {
 
     // Get the app state
     appState = Provider.of<AppState>(context, listen: false);
+
+    // Create a disconnected layer for the UI
+    sxiLayer = SXiLayer(appState);
+    deviceLayer = DeviceLayer(
+      sxiLayer,
+      '',
+      initialBaudRate,
+      transport: SerialTransport.serial,
+      onConnectionDetailChanged: onConnectionDetailsUpdated,
+      onMessage: onMessage,
+      onError: onDeviceConnectionError,
+      onClearMessages: () {
+        clearAllMessages();
+      },
+    );
+    sxiLayer.deviceLayer = deviceLayer;
 
     // Initialize the app state
     appState.initialize().then((_) async {
@@ -251,9 +274,117 @@ class MainPageState extends State<MainPage> {
       try {
         await startupSequence();
       } catch (e) {
+        logger.e('Startup sequence failed: $e');
         showStartupLoadError(e.toString());
       }
     });
+  }
+
+  void _showStartupGate(String message) {
+    if (!mounted) return;
+    setState(() {
+      _startupGateVisible = true;
+      _startupGateMessage = message;
+      _isLoading = false;
+      _connectionDetails = '';
+    });
+  }
+
+  void _hideStartupGate() {
+    if (!mounted) return;
+    setState(() {
+      _startupGateVisible = false;
+      _startupGateMessage = '';
+    });
+  }
+
+  bool get isStartupGateVisible => _startupGateVisible;
+
+  Future<bool> connectToPort(
+    String portString,
+    Object? portObject, {
+    SerialTransport transport = SerialTransport.serial,
+    bool persistPort = true,
+  }) async {
+    // Ensure any selection dialogs are gone so the main progress overlay is visible
+    try {
+      await clearAllMessages();
+    } catch (_) {}
+
+    _hideStartupGate();
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+    } catch (_) {}
+
+    if (persistPort && !kIsWeb && !kIsWasm && portString.isNotEmpty) {
+      try {
+        await appState.storageData.save(SaveDataType.lastPort, portString);
+        await appState.storageData
+            .save(SaveDataType.lastPortTransport, transport.name);
+      } catch (_) {}
+    }
+
+    final bool prevSuppress = _suppressFatalConnectionDialogs;
+    _suppressFatalConnectionDialogs = true;
+    _lastStartupConnectionError = null;
+
+    // Make sure we have a fresh protocol layer bound to the new device layer
+    sxiLayer = SXiLayer(appState);
+
+    final bool ok =
+        await tryStartup(portString, portObject, transport: transport);
+    _suppressFatalConnectionDialogs = prevSuppress;
+
+    if (!ok) {
+      final err = (_lastStartupConnectionError ?? '').trim();
+      _showStartupGate(err.isEmpty
+          ? 'Couldn\'t connect. Check the port/device and try again.'
+          : 'Couldn\'t connect.\n$err');
+      return false;
+    }
+
+    await onConnected();
+    return true;
+  }
+
+  Future<void> _openSettings() async {
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SettingsPage(mainPage: this),
+      ),
+    );
+  }
+
+  Future<void> onConnected() async {
+    if (!_startupCompleted) {
+      await clearAllMessages();
+      await setupAudio();
+      onPlaybackStateChanged();
+      _startupCompleted = true;
+    }
+    _hideStartupGate();
+  }
+
+  Future<void> _connectFromStartupGate() async {
+    final (SerialTransport, String, Object?) selection =
+        await _promptForConnection(
+      previousNetworkSpec: null,
+      canDismissSerial: true,
+      barrierDismissible: true,
+      message: null,
+    );
+
+    final SerialTransport transport = selection.$1;
+    final String portString = selection.$2;
+    final Object? portObject = selection.$3;
+    if (portString.isEmpty && portObject == null) {
+      _showStartupGate(
+          _startupGateMessage.isEmpty ? 'Not connected.' : _startupGateMessage);
+      return;
+    }
+    await connectToPort(portString, portObject, transport: transport);
   }
 
   // Show a dialog if the startup sequence fails
@@ -293,70 +424,92 @@ class MainPageState extends State<MainPage> {
 
   // The device startup sequence
   Future<void> startupSequence() async {
-    // Setup EQ, Volume, last SID, and presets for device prefs using AppState
-    _loadedConfig = SystemConfiguration(
-      volume: appState.eqSliderValues[0].round(),
-      defaultSid: appState.lastSid,
-      eq: calcEq(),
-      presets: appState.presets.map((preset) => preset.sid).toList(),
-      favoriteSongIDs: appState.favorites
-          .where((f) => f.type == FavoriteType.song)
-          .map((f) => f.id)
-          .toList(),
-      favoriteArtistIDs: appState.favorites
-          .where((f) => f.type == FavoriteType.artist)
-          .map((f) => f.id)
-          .toList(),
-    );
-
-    String lastPortString = await appState.storageData.load(
-      SaveDataType.lastPort,
-      defaultValue: '',
-    );
-    Object? lastPortObject;
-
-    (lastPortString, lastPortObject) = await selectAPort(
-      lastPortString,
-      lastPortObject,
-    );
-
-    // Initialize the SXi layer
-    sxiLayer = SXiLayer(appState);
-
-    // Try to startup the device layer
-    bool startupSuccess = await tryStartup(lastPortString, lastPortObject);
-    while (!startupSuccess) {
-      if (lastPortString.isNotEmpty) {
-        logger.d('Selecting a new port');
-        await appState.storageData.delete(SaveDataType.lastPort);
-        (lastPortString, lastPortObject) = await selectAPort('', null);
-        if (lastPortString.isEmpty && lastPortObject == null) {
-          onDeviceConnectionError('No valid port was selected.', true);
-          break;
-        } else {
-          startupSuccess = await tryStartup(lastPortString, lastPortObject);
-        }
-      } else {
-        deviceLayer.close();
-        onDeviceConnectionError(
-            'A valid port was available but none were selected.', true);
-        break;
-      }
+    if (_startupInProgress) {
+      logger.w('Startup sequence already in progress');
+      return;
     }
+    _startupInProgress = true;
+    _suppressFatalConnectionDialogs = true;
+    _lastStartupConnectionError = null;
 
-    if (startupSuccess) {
-      // Clear any messages and setup audio, then force-check for playback state changes
-      await clearAllMessages();
-      await setupAudio();
-      onPlaybackStateChanged();
+    try {
+      // Load system configuration
+      logger.d('Loading system configuration...');
+      _loadedConfig = SystemConfiguration(
+        volume: appState.eqSliderValues[0].round(),
+        defaultSid: appState.lastSid,
+        eq: calcEq(),
+        presets: appState.presets.map((preset) => preset.sid).toList(),
+        favoriteSongIDs: appState.favorites
+            .where((f) => f.type == FavoriteType.song)
+            .map((f) => f.id)
+            .toList(),
+        favoriteArtistIDs: appState.favorites
+            .where((f) => f.type == FavoriteType.artist)
+            .map((f) => f.id)
+            .toList(),
+      );
+
+      String lastPortString = await appState.storageData.load(
+            SaveDataType.lastPort,
+          ) ??
+          "";
+      final String? lastPortTransportString =
+          await appState.storageData.load(SaveDataType.lastPortTransport);
+      Object? lastPortObject;
+
+      if (lastPortString.isEmpty) {
+        _showStartupGate(
+          'No connection configured yet. Please select a connection.',
+        );
+        return;
+      }
+
+      // Initialize the SXi layer
+      sxiLayer = SXiLayer(appState);
+
+      SerialTransport? transport;
+      if (lastPortTransportString == SerialTransport.network.name) {
+        transport = SerialTransport.network;
+      } else if (lastPortTransportString == SerialTransport.serial.name) {
+        transport = SerialTransport.serial;
+      }
+
+      if (transport == null) {
+        _showStartupGate(
+          'Your saved connection needs to be reconfigured. Please select a new connection.',
+        );
+        return;
+      }
+
+      final bool startupSuccess = await tryStartup(
+          lastPortString, lastPortObject,
+          transport: transport);
+      if (!startupSuccess) {
+        final err = (_lastStartupConnectionError ?? '').trim();
+        _showStartupGate(err.isEmpty
+            ? 'Couldn\'t connect to the saved port.\n\nPlease select a new connection.'
+            : 'Couldn\'t connect to the saved port.\n$err\n\nPlease select a new connection.');
+        return;
+      }
+
+      await onConnected();
+    } finally {
+      _suppressFatalConnectionDialogs = false;
+      _startupInProgress = false;
     }
   }
 
   // Try to startup the device layer
-  Future<bool> tryStartup(String portString, Object? portObject) async {
+  Future<bool> tryStartup(
+    String portString,
+    Object? portObject, {
+    SerialTransport transport = SerialTransport.serial,
+  }) async {
     setState(() {
       _isLoading = true;
     });
+    _deviceConnected = false;
 
     try {
       // Ensure any existing connection is closed before creating a new one
@@ -370,6 +523,7 @@ class MainPageState extends State<MainPage> {
           sxiLayer,
           portObject,
           initialBaudRate,
+          transport: transport,
           systemConfiguration: _loadedConfig,
           onConnectionDetailChanged: onConnectionDetailsUpdated,
           onMessage: onMessage,
@@ -381,6 +535,7 @@ class MainPageState extends State<MainPage> {
           sxiLayer,
           portString,
           initialBaudRate,
+          transport: transport,
           systemConfiguration: _loadedConfig,
           onConnectionDetailChanged: onConnectionDetailsUpdated,
           onMessage: onMessage,
@@ -413,14 +568,21 @@ class MainPageState extends State<MainPage> {
       }
 
       final success = await deviceLayer.startupSequence();
-      if (success) {
+      _deviceConnected = success;
+      if (!success && mounted) {
         setState(() {
-          _autoRetryAttempted = false;
+          _isLoading = false;
         });
       }
       return success;
     } catch (e) {
-      onDeviceConnectionError(e.toString(), true);
+      _lastStartupConnectionError = e.toString();
+      _deviceConnected = false;
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
       return false;
     }
   }
@@ -438,23 +600,36 @@ class MainPageState extends State<MainPage> {
     } else {
       logger.e('Error: $details');
     }
+    if (fatal &&
+        !_deviceConnected &&
+        details.trim() == 'Device is not initialized') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Not connected. Please select a connection.'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
     if (fatal) {
-      // Automatic retry before showing the fatal dialog
-      if (!_autoRetryAttempted) {
-        setState(() {
-          _autoRetryAttempted = true;
-        });
-        try {
-          clearAllMessages();
-        } catch (_) {}
-        // Schedule retry on the next microtask to avoid setState during callback/build
-        Future.microtask(() => startupSequence());
+      if (_suppressFatalConnectionDialogs) {
+        _lastStartupConnectionError = details;
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
         return;
       }
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         _showFatalErrorDialog(context, details);
       });
     } else {
@@ -681,51 +856,6 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  // Try to select a device communication port
-  Future<(String, Object?)> selectAPort(
-    String lastPortString,
-    Object? lastPortObject, {
-    bool canDismiss = false,
-  }) async {
-    logger.d('selectAPort: $lastPortString, $lastPortObject');
-    if (lastPortString.isEmpty) {
-      // Ensure USB serial permission on Android
-      try {
-        await serialHelper.ensureSerialPermission();
-      } catch (_) {}
-
-      // List the available ports
-      var availablePorts = await serialHelper.listPorts();
-
-      // If there are ports, show the dialog
-      if (availablePorts.isNotEmpty || kIsWeb || kIsWasm) {
-        int portIndex = await _showSelectPortDialog(canDismiss);
-        availablePorts = await serialHelper.listPorts();
-        if (portIndex < 0 || portIndex > availablePorts.length) {
-          return ('', null);
-        }
-        // Save the selected port
-        if (!kIsWeb && !kIsWasm) {
-          lastPortString = availablePorts[portIndex] as String;
-        } else if (portIndex < availablePorts.length) {
-          lastPortObject = availablePorts[portIndex];
-        }
-      } else if (availablePorts.isEmpty && !kIsWeb && !kIsWasm) {
-        // No ports selected on device with ports
-        await _showSelectPortDialog(canDismiss);
-        return ('', null);
-      }
-
-      // Save the selected port for native platforms
-      if (!kIsWeb && !kIsWasm) {
-        appState.storageData.save(SaveDataType.lastPort, lastPortString);
-      }
-    }
-
-    return (lastPortString, lastPortObject);
-  }
-
-  // Dispose of the device layer and audio controller
   @override
   void dispose() {
     deviceLayer.close();
@@ -979,118 +1109,52 @@ class MainPageState extends State<MainPage> {
     );
   }
 
-  // Show the select port dialog
-  Future<int> _showSelectPortDialog(bool canDismiss) async {
-    List<String> comPorts = [];
-
-    Future<List<String>> loadPorts() async {
-      // Ensure we don't append duplicates on refresh/reopen
-      comPorts.clear();
-      var availablePorts = await serialHelper.listPorts();
-      logger.d('Available ports: ${availablePorts.length}');
-
-      for (var port in availablePorts) {
-        var portName = await serialHelper.getPortName(port);
-        logger.d('Port: $portName');
-        if (portName.isEmpty) {
-          portName = port.toString();
+  Future<(SerialTransport, String, Object?)> _promptForConnection({
+    String? previousNetworkSpec,
+    bool canDismissSerial = false,
+    bool barrierDismissible = false,
+    String? message,
+  }) async {
+    while (true) {
+      final SerialTransport? transport =
+          await ConnectionDialogs.showConnectionType(
+        context,
+        barrierDismissible: barrierDismissible,
+        message: message,
+      );
+      if (!mounted) {
+        return (SerialTransport.serial, '', null);
+      }
+      if (transport == null) {
+        return (SerialTransport.serial, '', null);
+      }
+      if (transport == SerialTransport.network && !kIsWeb && !kIsWasm) {
+        final String? spec = await ConnectionDialogs.showNetworkConfig(context);
+        if (!mounted) {
+          return (SerialTransport.serial, '', null);
         }
-        comPorts.add(portName);
+        if (spec == null) {
+          continue;
+        }
+        return (SerialTransport.network, spec, null);
+      } else if (transport == SerialTransport.serial) {
+        final (String, Object?) res = await ConnectionDialogs.selectSerialPort(
+          context,
+          serialHelper: serialHelper,
+          storageData: appState.storageData,
+          canDismiss: canDismissSerial,
+        );
+        if (!mounted) {
+          return (SerialTransport.serial, '', null);
+        }
+        if (res.$1.isEmpty && res.$2 == null) {
+          continue;
+        }
+        return (SerialTransport.serial, res.$1, res.$2);
+      } else {
+        return (SerialTransport.serial, '', null);
       }
-
-      if (kIsWeb || kIsWasm) {
-        comPorts.add('Select New...');
-      }
-
-      return comPorts;
     }
-
-    Future<List<String>> portsFuture = loadPorts();
-
-    return await showDialog<int>(
-          barrierDismissible: canDismiss,
-          context: context,
-          builder: (BuildContext context) {
-            return StatefulBuilder(
-              builder: (BuildContext context, StateSetter setStateDialog) {
-                return AlertDialog(
-                  title: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Select Serial Device...',
-                          overflow: TextOverflow.ellipsis,
-                          softWrap: false,
-                        ),
-                      ),
-                      if (!kIsWeb && !kIsWasm)
-                        IconButton(
-                          icon: const Icon(Icons.refresh),
-                          tooltip: 'Refresh Ports',
-                          onPressed: () {
-                            setStateDialog(() {
-                              portsFuture = loadPorts();
-                            });
-                          },
-                        ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        tooltip: 'Close',
-                        onPressed: () {
-                          if (kIsWeb || kIsWasm) {
-                            try {
-                              deviceLayer.close();
-                            } catch (_) {}
-                            Navigator.pop(context, -1);
-                            onDeviceConnectionError(
-                                'A valid port was available but none were selected.',
-                                true);
-                            return;
-                          }
-                          // Cancel without modifying saved port
-                          Navigator.pop(context, -1);
-                        },
-                      ),
-                    ],
-                  ),
-                  content: SizedBox(
-                    width: double.maxFinite,
-                    child: FutureBuilder<List<String>>(
-                      future: portsFuture,
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                        }
-                        if (snapshot.hasError) {
-                          return Center(
-                            child: Text('Error: ${snapshot.error}'),
-                          );
-                        }
-                        comPorts = snapshot.data ?? [];
-                        return ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: comPorts.length,
-                          itemBuilder: (context, index) {
-                            return ListTile(
-                              title: Text(comPorts[index]),
-                              onTap: () {
-                                Navigator.pop(context, index);
-                              },
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        ) ??
-        0;
   }
 
   // Build the text that may show in the app bar
@@ -1212,7 +1276,7 @@ class MainPageState extends State<MainPage> {
                                                     .tuneUsingChannelNumber,
                                                 channelNumber,
                                                 0xFF,
-                                                Overrides.all(),
+                                                ChannelAttributes.all(),
                                                 AudioRoutingType.routeToAudio,
                                               );
                                               deviceLayer
@@ -1414,7 +1478,7 @@ class MainPageState extends State<MainPage> {
                                     ChanSelectionType.tuneUsingSID,
                                     sid,
                                     0xFF,
-                                    Overrides.all(),
+                                    ChannelAttributes.all(),
                                     AudioRoutingType.routeToAudio,
                                   );
                                   deviceLayer.sendControlCommand(cfgCmd);
@@ -1447,7 +1511,7 @@ class MainPageState extends State<MainPage> {
                                             .tuneUsingChannelNumber,
                                         channelNumber,
                                         0xFF,
-                                        Overrides.all(),
+                                        ChannelAttributes.all(),
                                         AudioRoutingType.routeToAudio,
                                       );
                                       deviceLayer.sendControlCommand(cfgCmd);
@@ -1565,7 +1629,7 @@ class MainPageState extends State<MainPage> {
                                     ChanSelectionType.tuneUsingSID,
                                     sid,
                                     0xFF,
-                                    Overrides.all(),
+                                    ChannelAttributes.all(),
                                     AudioRoutingType.routeToAudio,
                                   );
                                   deviceLayer.sendControlCommand(cfgCmd);
@@ -1604,6 +1668,69 @@ class MainPageState extends State<MainPage> {
                       ),
                     ],
                   ),
+                ),
+              ),
+            if (_startupGateVisible)
+              Positioned.fill(
+                child: Stack(
+                  children: [
+                    const ModalBarrier(
+                      dismissible: false,
+                      color: Colors.black54,
+                    ),
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 560),
+                        child: Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(18),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Connection Required',
+                                  style: Theme.of(context)
+                                          .textTheme
+                                          .titleLarge
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ) ??
+                                      const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  _startupGateMessage.isEmpty
+                                      ? 'Connect to a device to continue.'
+                                      : _startupGateMessage,
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                                const SizedBox(height: 16),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    OutlinedButton.icon(
+                                      onPressed: _openSettings,
+                                      icon: const Icon(Icons.settings),
+                                      label: const Text('Settings'),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    FilledButton.icon(
+                                      onPressed: _connectFromStartupGate,
+                                      icon: const Icon(Icons.cable),
+                                      label: const Text('Connect'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
           ],
@@ -1776,7 +1903,7 @@ class MainPageState extends State<MainPage> {
                                   .stopScanAndContinuePlaybackOfCurrentTrack,
                               0,
                               appState.currentCategory,
-                              Overrides.all(),
+                              ChannelAttributes.all(),
                               AudioRoutingType.routeToAudio,
                             );
                             deviceLayer.sendControlCommand(cfgCmd);
@@ -1786,7 +1913,7 @@ class MainPageState extends State<MainPage> {
                                   .scanSmartFavoriteMusicOnlyContent,
                               0,
                               appState.currentCategory,
-                              Overrides.all(),
+                              ChannelAttributes.all(),
                               AudioRoutingType.routeToAudio,
                             );
                             deviceLayer.sendControlCommand(cfgCmd);
@@ -1884,7 +2011,7 @@ class MainPageState extends State<MainPage> {
                               ChanSelectionType.tuneUsingChannelNumber,
                               appState.currentChannel,
                               appState.currentCategory,
-                              Overrides.all(),
+                              ChannelAttributes.all(),
                               AudioRoutingType.routeToAudio,
                             );
                             deviceLayer.sendControlCommand(cfgCmd);
@@ -1893,7 +2020,7 @@ class MainPageState extends State<MainPage> {
                               ChanSelectionType.tuneUsingSID,
                               0x1001,
                               appState.currentCategory,
-                              Overrides.all(),
+                              ChannelAttributes.all(),
                               AudioRoutingType.routeToAudio,
                             );
                             deviceLayer.sendControlCommand(cfgCmd);
@@ -1993,7 +2120,7 @@ class MainPageState extends State<MainPage> {
                     .abortScanAndResumePlaybackOfItemActiveAtScanInitiation,
                 0,
                 appState.currentCategory,
-                Overrides.all(),
+                ChannelAttributes.all(),
                 AudioRoutingType.routeToAudio,
               );
               deviceLayer.sendControlCommand(cfgCmd);
@@ -2039,7 +2166,7 @@ class MainPageState extends State<MainPage> {
               ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
               appState.nowPlaying.channelNumber,
               0xFF,
-              Overrides.all(),
+              ChannelAttributes.all(),
               AudioRoutingType.routeToAudio,
             );
             deviceLayer.sendControlCommand(cfgCmd);
@@ -2064,7 +2191,7 @@ class MainPageState extends State<MainPage> {
                   ChanSelectionType.tuneUsingChannelNumber,
                   channel,
                   0xFF,
-                  Overrides.all(),
+                  ChannelAttributes.all(),
                   AudioRoutingType.routeToAudio,
                 );
                 deviceLayer.sendControlCommand(cfgCmd);
@@ -2088,7 +2215,7 @@ class MainPageState extends State<MainPage> {
               ChanSelectionType.tuneToNextHigherChannelNumberInCategory,
               appState.nowPlaying.channelNumber,
               0xFF,
-              Overrides.all(),
+              ChannelAttributes.all(),
               AudioRoutingType.routeToAudio,
             );
             deviceLayer.sendControlCommand(cfgCmd);
