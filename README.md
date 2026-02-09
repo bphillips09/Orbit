@@ -25,9 +25,9 @@ Orbit connects to an [SXV300][sxv300-link] tuner and controls it using the SXi p
 | Presets Mix | ✅ Supported |
 | Restart song on tune | ✅ Supported |
 | Song / Artist alerts | ✅ Supported |
+| Internet Streaming | ⏳ In Progress |
+| Weather / Data (downloaded from satellite) | ⏳ In Progress |
 | Sports alerts | ⏳ Planned |
-| Weather / Data (downloaded from satellite) | ❌ Not yet supported |
-| Internet Streaming | ❌ Not supported |
 
 ## Platforms
 
@@ -74,7 +74,7 @@ This app interacts with serial devices and can capture audio for playback. It re
    ```
 
 ## SXi Documentation
-Coming soon.
+- [Reverse-Engineered SXi protocol](docs/sxi-protocol.md)
 
 ## Disclaimer
 
