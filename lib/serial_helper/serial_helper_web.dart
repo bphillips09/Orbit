@@ -175,8 +175,14 @@ class WebSerialHelper implements SerialHelper {
 
   @override
   Future<bool> ensureSerialPermission() async {
-    // Web prompts via requestPort when needed; nothing to do here.
-    return true;
+    try {
+      await web.window.navigator.serial.requestPort().toDart;
+      return true;
+    } catch (e) {
+      // User cancelled or the browser blocked the request
+      logger.w('Serial permission request failed: $e');
+      return false;
+    }
   }
 }
 

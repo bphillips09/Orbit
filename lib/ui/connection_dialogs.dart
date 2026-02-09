@@ -195,6 +195,7 @@ class ConnectionDialogs {
     bool canDismiss = false,
   }) async {
     List<String> comPorts = [];
+    const String selectNewLabel = 'Select New...';
 
     Future<List<String>> loadPorts() async {
       comPorts.clear();
@@ -209,7 +210,7 @@ class ConnectionDialogs {
         comPorts.add(portName);
       }
       if (kIsWeb || kIsWasm) {
-        comPorts.add('Select New...');
+        comPorts.add(selectNewLabel);
       }
       return comPorts;
     }
@@ -275,6 +276,16 @@ class ConnectionDialogs {
                         return ListTile(
                           title: Text(label),
                           onTap: () async {
+                            if ((kIsWeb || kIsWasm) &&
+                                label == selectNewLabel) {
+                              try {
+                                await serialHelper.ensureSerialPermission();
+                              } catch (_) {}
+                              setStateDialog(() {
+                                portsFuture = loadPorts();
+                              });
+                              return;
+                            }
                             Navigator.pop(dialogContext, index);
                           },
                         );
@@ -301,7 +312,9 @@ class ConnectionDialogs {
     Object? lastPortObject;
 
     try {
-      await serialHelper.ensureSerialPermission();
+      if (!kIsWeb && !kIsWasm) {
+        await serialHelper.ensureSerialPermission();
+      }
     } catch (_) {}
 
     var availablePorts = await serialHelper.listPorts();
