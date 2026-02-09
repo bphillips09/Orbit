@@ -222,14 +222,8 @@ class GraphicalWeatherHandler extends DSIHandler {
         day > 31 ||
         hour > 23 ||
         minute >= 60) {
-      logger.t('GraphWX: invalid time fields m=' +
-          month.toString() +
-          ' d=' +
-          day.toString() +
-          ' h=' +
-          hour.toString() +
-          ' m=' +
-          minute.toString());
+      logger
+          .t('GraphWX: invalid time fields m=$month d=$day h=$hour m=$minute');
       return _WxTime(DateTime.fromMillisecondsSinceEpoch(0, isUtc: true));
     }
     int year;
@@ -376,8 +370,7 @@ class _WxMBR {
   final double maxLat;
   final double maxLon;
   _WxMBR(this.minLat, this.minLon, this.maxLat, this.maxLon);
-  String get asString =>
-      '[Lat [${minLat} -> ${maxLat}] Lon [${minLon} -> ${maxLon}]]';
+  String get asString => '[Lat [$minLat -> $maxLat] Lon [$minLon -> $maxLon]]';
 }
 
 class _RasterHeader {
