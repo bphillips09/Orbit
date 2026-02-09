@@ -166,3 +166,6 @@ app.*.symbols
 
 # FVM Version Cache
 .fvm/
+
+# Local tooling output
+/decomp/
