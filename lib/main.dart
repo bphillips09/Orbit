@@ -39,6 +39,7 @@ import 'package:orbit/ui/favorite_dialog.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/welcome_dialog.dart';
 import 'package:orbit/ui/connection_dialogs.dart';
+import 'package:orbit/platform/head_unit_aux.dart';
 
 // Audio service handler
 AudioServiceHandler? audioServiceHandler;
@@ -769,6 +770,34 @@ class MainPageState extends State<MainPage> {
 
   Future<void> setupAudio() async {
     logger.i('Audio setup starting...');
+
+    if (!kIsWeb &&
+        !kIsWasm &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        appState.useNativeAuxInput) {
+      try {
+        audioController.stopAudioThread();
+      } catch (_) {}
+      appState.updateEnableAudio(false);
+
+      // Switch the head unit to aux now
+      try {
+        final appId = await HeadUnitAux.switchToAux(timeoutMs: 1500);
+        onMessage(
+          'Head Unit Audio',
+          'Switched to Aux input (AppId: $appId).',
+        );
+      } catch (e, st) {
+        logger.e('Failed to switch to aux input', error: e, stackTrace: st);
+        appState.updateUseNativeAuxInput(false);
+        onMessage(
+          'Head Unit Audio',
+          'Failed to switch to aux input: ${HeadUnitAux.describeError(e)}',
+        );
+      }
+      return;
+    }
+
     // Load saved audio preferences
     bool? savedEnableAudio = await appState.storageData.load(
       SaveDataType.enableAudio,

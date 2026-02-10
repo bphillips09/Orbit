@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:open_file/open_file.dart';
 import 'package:orbit/data/handlers/channel_graphics_handler.dart';
+import 'package:orbit/platform/head_unit_aux.dart';
 import 'package:orbit/serial_helper/serial_helper_interface.dart';
 import 'package:orbit/ui/connection_dialogs.dart';
 import 'package:orbit/ui/epg_schedule_view.dart';
@@ -295,6 +296,46 @@ class SettingsPage extends StatelessWidget {
                     _buildEqualizerWidget(context, mainPage, appState),
                   ],
                 ),
+                if (!kIsWeb && !kIsWasm && Platform.isAndroid)
+                  _buildSwitchTile(
+                    context,
+                    'Use Head Unit Native Aux Input',
+                    'Switches the head unit to aux input',
+                    Icons.input,
+                    value: appState.useNativeAuxInput,
+                    onChanged: (value) async {
+                      appState.updateUseNativeAuxInput(value);
+                      if (!value) return;
+
+                      try {
+                        mainPage.audioController.stopAudioThread();
+                      } catch (_) {}
+                      appState.updateEnableAudio(false);
+
+                      final res = await HeadUnitAux.trySwitchToAux(
+                        timeoutMs: 1500,
+                      );
+                      if (res.appId == null) {
+                        appState.updateUseNativeAuxInput(false);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                  'Failed to switch to aux input: ${res.errorMessage ?? 'Unknown error'}'),
+                            ),
+                          );
+                        }
+                        return;
+                      }
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Switched to aux input'),
+                          ),
+                        );
+                      }
+                    },
+                  ),
                 _buildSwitchTile(
                   context,
                   'Use App for Audio Playback',
@@ -302,6 +343,21 @@ class SettingsPage extends StatelessWidget {
                   Icons.play_circle_outline,
                   value: appState.enableAudio,
                   onChanged: (value) async {
+                    if (value &&
+                        !kIsWeb &&
+                        !kIsWasm &&
+                        Platform.isAndroid &&
+                        appState.useNativeAuxInput) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'App audio playback is disabled while using native aux input.'),
+                          ),
+                        );
+                      }
+                      return;
+                    }
                     appState.updateEnableAudio(value);
 
                     if (value) {

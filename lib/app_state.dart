@@ -43,6 +43,8 @@ class AppState extends ChangeNotifier {
   // Android-only: preferred audio output route
   String androidAudioOutputRoute = 'Speaker';
   bool detectAudioInterruptions = true;
+  // Android-only: if true, use head unit native aux input instead of app playback
+  bool useNativeAuxInput = false;
   bool isScanActive = false;
   bool isTuneMixActive = false;
   ThemeMode themeMode = ThemeMode.dark;
@@ -375,6 +377,12 @@ class AppState extends ChangeNotifier {
       defaultValue: true,
     );
 
+    // Load head unit aux input preference
+    useNativeAuxInput = await storageData.load(
+      SaveDataType.useNativeAuxInput,
+      defaultValue: false,
+    );
+
     // Load audio sample rate preference (default 48000)
     audioSampleRate = await storageData.load(
       SaveDataType.audioSampleRate,
@@ -564,6 +572,12 @@ class AppState extends ChangeNotifier {
   void updateDetectAudioInterruptions(bool value) {
     detectAudioInterruptions = value;
     storageData.save(SaveDataType.detectAudioInterruptions, value);
+    notifyListeners();
+  }
+
+  void updateUseNativeAuxInput(bool value) {
+    useNativeAuxInput = value;
+    storageData.save(SaveDataType.useNativeAuxInput, value);
     notifyListeners();
   }
 
