@@ -9,6 +9,8 @@ object HeadUnitAuxManager {
   private val backends: List<HeadUnitAuxBackend> = listOf(
     // FYT
     FytSyuMsAux,
+    // PX5 / PX6 (Microntek)
+    MicrontekCarServiceAux,
   )
 
   fun getSupportedBackend(context: Context): HeadUnitAuxBackend? {

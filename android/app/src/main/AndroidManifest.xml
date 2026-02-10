@@ -61,5 +61,8 @@
         </intent>
         <!-- FYT Aux-in support -->
         <package android:name="com.syu.ms" />
+        <!-- Microntek / MTC Aux-in support -->
+        <package android:name="android.microntek.service" />
+        <package android:name="com.microntek.avin" />
     </queries>
 </manifest>
