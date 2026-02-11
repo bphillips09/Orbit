@@ -11,9 +11,9 @@ import 'package:orbit/logging.dart';
 
 class AudioController {
   bool _useIsolate = false;
-  Isolate? _audioIsolate;
   late SendPort _audioSendPort;
   ReceivePort? _receivePort;
+  ReceivePort? _isolateExitPort;
   // Tracks whether we've initialized and/or started components to allow safe teardown
   bool _audioStreamInitialized = false;
   bool _recordStreamStarted = false;
@@ -243,10 +243,12 @@ class AudioController {
       // For non‑Android and non-Web, spawn an isolate
       _useIsolate = true;
       _receivePort = ReceivePort();
-      _audioIsolate = await Isolate.spawn(
+      _isolateExitPort = ReceivePort();
+      await Isolate.spawn(
         _audioIsolateEntry,
         _receivePort!.sendPort,
         debugName: 'AudioIsolate',
+        onExit: _isolateExitPort!.sendPort,
       );
       _audioSendPort = await _receivePort!.first;
       _isolateInitialized = true;
@@ -362,11 +364,11 @@ class AudioController {
     return float32List;
   }
 
-  void stopAudioThread() {
+  Future<void> stopAudioThread() async {
     logger.t('stopAudioThread: started=$_isStarted, useIsolate=$_useIsolate');
     // Stop interruption subscription
     try {
-      _interruptionSub?.cancel();
+      await _interruptionSub?.cancel();
     } catch (_) {}
     _interruptionSub = null;
     if (_useIsolate) {
@@ -376,26 +378,36 @@ class AudioController {
           _audioSendPort.send({'cmd': 'stop'});
         } catch (_) {}
       }
-      try {
-        _audioIsolate?.kill(priority: Isolate.immediate);
-      } catch (_) {}
-      _audioIsolate = null;
+      final exitPort = _isolateExitPort;
+      if (exitPort != null) {
+        try {
+          // Wait briefly for the isolate to exit after cleanup
+          await exitPort.first.timeout(const Duration(seconds: 2));
+        } catch (_) {}
+      } else {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
+
       try {
         _receivePort?.close();
       } catch (_) {}
       _receivePort = null;
+      try {
+        _isolateExitPort?.close();
+      } catch (_) {}
+      _isolateExitPort = null;
       _isolateInitialized = false;
     } else {
       // Stop input stream if it was started
       try {
         if (_recordStreamStarted) {
-          record.stop();
+          await record.stop();
         }
       } catch (_) {}
       _recordStreamStarted = false;
       // Dispose may be safe to call repeatedly in the plugin; ignore errors
       try {
-        record.dispose();
+        await record.dispose();
       } catch (_) {}
       // Only uninit output if it was previously initialized
       try {
@@ -409,7 +421,7 @@ class AudioController {
   }
 
   void dispose() {
-    stopAudioThread();
+    unawaited(stopAudioThread());
   }
 }
 
@@ -539,12 +551,20 @@ void _audioIsolateEntry(SendPort mainSendPort) async {
           isPlayingTone = false;
           break;
         case 'stop':
-          recorder.stop();
-          recorder.deinit();
-          audioStream.uninit();
+          try {
+            recorder.stop();
+          } catch (_) {}
+          try {
+            recorder.deinit();
+          } catch (_) {}
+          try {
+            audioStream.uninit();
+          } catch (_) {}
           running = false;
-          port.close();
-          break;
+          try {
+            port.close();
+          } catch (_) {}
+          Isolate.exit();
         default:
           break;
       }

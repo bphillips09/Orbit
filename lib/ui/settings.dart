@@ -308,7 +308,7 @@ class SettingsPage extends StatelessWidget {
                       if (!value) return;
 
                       try {
-                        mainPage.audioController.stopAudioThread();
+                        await mainPage.audioController.stopAudioThread();
                       } catch (_) {}
                       appState.updateEnableAudio(false);
 
@@ -381,7 +381,7 @@ class SettingsPage extends StatelessWidget {
                       }
                     } else {
                       // If disabling audio, stop audio thread
-                      mainPage.audioController.stopAudioThread();
+                      await mainPage.audioController.stopAudioThread();
                     }
                   },
                 ),
@@ -644,8 +644,8 @@ class SettingsPage extends StatelessWidget {
                     'Stop All Audio',
                     'Stop audio capture/playback threads',
                     Icons.volume_off,
-                    onTap: () {
-                      mainPage.audioController.stopAudioThread();
+                    onTap: () async {
+                      await mainPage.audioController.stopAudioThread();
                     },
                   ),
                   _buildSettingTile(
@@ -1222,7 +1222,7 @@ class SettingsPage extends StatelessWidget {
         if (appState.enableAudio) {
           final main = mainPage;
           try {
-            main.audioController.stopAudioThread();
+            await main.audioController.stopAudioThread();
           } catch (_) {}
           try {
             await main.audioController.startAudioThread(
@@ -1446,7 +1446,7 @@ class SettingsPage extends StatelessWidget {
             appState.updateAudioSampleRate(value);
             if (appState.enableAudio) {
               try {
-                main.audioController.stopAudioThread();
+                await main.audioController.stopAudioThread();
               } catch (_) {}
               try {
                 await main.audioController.startAudioThread(
@@ -2163,7 +2163,7 @@ class SettingsPage extends StatelessWidget {
       appState.storageData.save(SaveDataType.lastAudioDevice, deviceName);
 
       // Stop current audio and restart with new device
-      mainPage.audioController.stopAudioThread();
+      await mainPage.audioController.stopAudioThread();
       try {
         await mainPage.audioController.startAudioThread(
             selectedDevice: selectedDevice,
@@ -2217,7 +2217,7 @@ class SettingsPage extends StatelessWidget {
       appState.updateAudioSampleRate(48000);
 
       // Stop current audio
-      mainPage.audioController.stopAudioThread();
+      await mainPage.audioController.stopAudioThread();
       appState.updateEnableAudio(false);
 
       if (context.mounted) {

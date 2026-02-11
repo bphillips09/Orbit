@@ -776,7 +776,7 @@ class MainPageState extends State<MainPage> {
         defaultTargetPlatform == TargetPlatform.android &&
         appState.useNativeAuxInput) {
       try {
-        audioController.stopAudioThread();
+        await audioController.stopAudioThread();
       } catch (_) {}
       appState.updateEnableAudio(false);
 
