@@ -13,6 +13,12 @@ object HeadUnitAuxManager {
     MicrontekCarServiceAux,
     // JanCar / Autochips / Mediatek
     JancarAutochipsAux,
+    // QF / MCU channel switch
+    QfMcuAux,
+    // Junsun V1
+    JunsunMainAux,
+    // Debug
+    //DebugFakeAux,
   )
 
   fun getSupportedBackend(context: Context): HeadUnitAuxBackend? {
