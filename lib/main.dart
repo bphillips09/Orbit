@@ -811,12 +811,16 @@ class MainPageState extends State<MainPage>
       } else if (!kIsWeb && !kIsWasm) {
         SystemNavigator.pop();
       } else {
-        Navigator.of(context, rootNavigator: true).pop();
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
       }
     } catch (_) {
       // Fallback: close the top-most dialog if any
       try {
-        Navigator.of(context, rootNavigator: true).pop();
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
       } catch (_) {}
     }
   }
