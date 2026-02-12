@@ -55,12 +55,12 @@ dependencies:
   latlong2: ^0.9.1
 
 dependency_overrides:
-  #added support for background input capture on Android 14+
-  record_android:
+  #fix for stereo capture on macOS
+  record_macos:
     git:
       url: https://github.com/bphillips09/record.git
-      path: record_android
-      ref: master
+      path: record_macos
+      ref: sync/upstream-macos-stereo-fix
   package_info_plus: ^8.3.1
   device_info_plus: ^11.5.0
   universal_io: ^2.3.1

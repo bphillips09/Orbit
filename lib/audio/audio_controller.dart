@@ -1,44 +1,36 @@
 import 'dart:async';
-import 'dart:isolate';
 import 'dart:math' as math;
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_recorder/flutter_recorder.dart';
 import 'package:mp_audio_stream/mp_audio_stream.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:orbit/logging.dart';
 
 class AudioController {
-  bool _useIsolate = false;
-  late SendPort _audioSendPort;
-  ReceivePort? _receivePort;
-  ReceivePort? _isolateExitPort;
   // Tracks whether we've initialized and/or started components to allow safe teardown
   bool _audioStreamInitialized = false;
   bool _recordStreamStarted = false;
-  bool _isolateInitialized = false;
   bool _isStarted = false;
   String? _androidAudioOutputRoute;
   bool _detectAudioInterruptions = true;
 
   final AudioStream _audioStream = getAudioStream();
-  final PCMFormat format = PCMFormat.f32le;
   int sampleRate = 48000;
-  final RecorderChannels channels = RecorderChannels.stereo;
-  final recorder = Recorder.instance;
-  final record = AudioRecorder();
+  AudioRecorder? _recorder;
+  StreamSubscription<Uint8List>? _recordStreamSub;
   bool _isPlayingTone = false;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
   bool _wasPausedByInterruption = false;
+
+  AudioRecorder _ensureRecorder() {
+    return _recorder ??= AudioRecorder();
+  }
 
   final _androidAudioManager =
       !kIsWeb && !kIsWasm && defaultTargetPlatform == TargetPlatform.android
           ? AndroidAudioManager()
           : null;
-
-  bool get usesRecordPlugin =>
-      kIsWasm || kIsWeb || defaultTargetPlatform == TargetPlatform.android;
 
   Future<bool> switchToSpeaker() async {
     if (_androidAudioManager != null) {
@@ -112,12 +104,9 @@ class AudioController {
 
   // Ensure microphone permission is granted where needed (Web/Wasm/Android)
   Future<bool> ensureMicrophonePermission() async {
-    if (!usesRecordPlugin) {
-      // We should check permission with flutter_recorder...
-      return true;
-    }
-
-    if (defaultTargetPlatform == TargetPlatform.android) {
+    if (!kIsWeb &&
+        !kIsWasm &&
+        defaultTargetPlatform == TargetPlatform.android) {
       PermissionStatus status = await Permission.microphone.status;
       if (status.isGranted) return true;
       status = await Permission.microphone.request();
@@ -125,8 +114,8 @@ class AudioController {
     }
 
     try {
-      logger.d('Checking microphone permission on web');
-      final hasPermission = await record.hasPermission();
+      logger.d('Checking microphone permission');
+      final hasPermission = await _ensureRecorder().hasPermission();
       logger.d('Input permission granted: $hasPermission');
       if (hasPermission) return true;
       logger.w('Input permission not granted');
@@ -137,15 +126,11 @@ class AudioController {
   }
 
   Future<List<dynamic>> getAvailableInputDevices() async {
-    if (usesRecordPlugin) {
-      return await record.listInputDevices();
-    } else {
-      return recorder.listCaptureDevices();
-    }
+    return await _ensureRecorder().listInputDevices();
   }
 
   String getDeviceName(dynamic device) {
-    if (usesRecordPlugin && device is InputDevice) {
+    if (device is InputDevice) {
       return device.label;
     } else {
       try {
@@ -163,12 +148,18 @@ class AudioController {
       int? preferredSampleRate}) async {
     logger.t('startAudioThread: $selectedDevice at $preferredSampleRate');
     _detectAudioInterruptions = detectAudioInterruptions;
+    if (_isStarted) {
+      try {
+        await stopAudioThread();
+      } catch (_) {}
+    }
     if (preferredSampleRate != null && preferredSampleRate > 0) {
       sampleRate = preferredSampleRate;
     } else {
       sampleRate = 48000;
     }
-    // Initialize the AudioSession (runs on the main isolate)
+
+    // Initialize the AudioSession
     var session = await AudioSession.instance;
     if (await session.setActive(true,
         androidWillPauseWhenDucked: _detectAudioInterruptions)) {
@@ -189,11 +180,13 @@ class AudioController {
           // Pause capture if currently recording
           try {
             if (_recordStreamStarted) {
-              final isRec = await record.isRecording();
-              final isPaused = await record.isPaused();
+              final rec = _recorder;
+              if (rec == null) return;
+              final isRec = await rec.isRecording();
+              final isPaused = await rec.isPaused();
               if (isRec && !isPaused) {
                 _wasPausedByInterruption = true;
-                await record.pause();
+                await rec.pause();
               }
             }
           } catch (_) {}
@@ -204,7 +197,9 @@ class AudioController {
             await _applyPreferredAndroidRoute();
             _wasPausedByInterruption = false;
             try {
-              await record.resume();
+              final rec = _recorder;
+              if (rec == null) return;
+              await rec.resume();
             } catch (_) {}
           }
         }
@@ -213,66 +208,47 @@ class AudioController {
       _interruptionSub = null;
     }
 
-    if (usesRecordPlugin) {
-      _useIsolate = false;
-      // Remember route for re-application after interruption
-      _androidAudioOutputRoute = androidAudioOutputRoute;
-      if (defaultTargetPlatform == TargetPlatform.android) {
-        PermissionStatus status = await Permission.microphone.request();
-        if (!status.isGranted) {
-          await [Permission.microphone].request();
-        }
+    // Remember route for re-application after interruption
+    _androidAudioOutputRoute = androidAudioOutputRoute;
+    if (!kIsWeb &&
+        !kIsWasm &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      PermissionStatus status = await Permission.microphone.request();
+      if (!status.isGranted) {
+        await [Permission.microphone].request();
       }
+    }
 
-      _audioStream.init(
-        waitingBufferMilliSec: 0,
-        bufferMilliSec: 500,
-        sampleRate: sampleRate,
-        channels: 2,
+    _audioStream.init(
+      waitingBufferMilliSec: 0,
+      bufferMilliSec: 500,
+      sampleRate: sampleRate,
+      channels: 2,
+    );
+
+    _audioStreamInitialized = true;
+
+    // Apply preferred Android audio route after audio is active
+    await _applyPreferredAndroidRoute();
+
+    _audioStream.resume();
+    try {
+      await _runAudioInputNonIsolate(
+        selectedDevice: selectedDevice,
+        effectiveSampleRate: sampleRate,
       );
-      _audioStreamInitialized = true;
-
-      // Apply preferred Android audio route after audio is active
-      await _applyPreferredAndroidRoute();
-
-      _audioStream.resume();
-      _runAudioInputNonIsolate(
-          selectedDevice: selectedDevice, effectiveSampleRate: sampleRate);
       _isStarted = true;
-    } else {
-      // For non‑Android and non-Web, spawn an isolate
-      _useIsolate = true;
-      _receivePort = ReceivePort();
-      _isolateExitPort = ReceivePort();
-      await Isolate.spawn(
-        _audioIsolateEntry,
-        _receivePort!.sendPort,
-        debugName: 'AudioIsolate',
-        onExit: _isolateExitPort!.sendPort,
-      );
-      _audioSendPort = await _receivePort!.first;
-      _isolateInitialized = true;
-      _audioSendPort.send({
-        'cmd': 'init',
-        'selectedDevice': selectedDevice,
-        'preferredSampleRate': sampleRate,
-      });
-      _isStarted = true;
+    } catch (e, st) {
+      logger.e('Failed to start audio input: $e\n$st');
+      try {
+        await stopAudioThread();
+      } catch (_) {}
     }
   }
 
   void playTestTone(int frequency, int durationSeconds) async {
     logger.t(
-        'playTestTone: $frequency Hz, $durationSeconds s | usingIsolate=$_useIsolate');
-    if (_useIsolate) {
-      logger.t('Playing test tone in isolate');
-      _audioSendPort.send({
-        'cmd': 'playTestTone',
-        'frequency': frequency,
-        'durationSeconds': durationSeconds
-      });
-      return;
-    }
+        'playTestTone: $frequency Hz, $durationSeconds s | sampleRate=$sampleRate');
 
     // Generate and push small chunks (~50ms) to respect output buffer capacity
     final int framesPerSecond = sampleRate;
@@ -304,8 +280,9 @@ class AudioController {
   }
 
   // Runs audio capture on Android using the Record plugin on main isolate
-  void _runAudioInputNonIsolate(
+  Future<void> _runAudioInputNonIsolate(
       {dynamic selectedDevice, int? effectiveSampleRate}) async {
+    final record = _ensureRecorder();
     await record.hasPermission();
     logger.t('Running audio input on main isolate');
     List<InputDevice> allDevices = [];
@@ -344,11 +321,17 @@ class AudioController {
           : AudioInterruptionMode.none,
       device: device,
     ));
+
     _recordStreamStarted = true;
 
-    recordStream.listen((stream) {
+    try {
+      await _recordStreamSub?.cancel();
+    } catch (_) {}
+    _recordStreamSub = recordStream.listen((stream) {
       if (_isPlayingTone) return;
       _audioStream.push(_convertUint8ListToFloat32List(stream));
+    }, onError: (Object e, StackTrace st) {
+      logger.e('Audio record stream error: $e\n$st');
     });
   }
 
@@ -365,209 +348,49 @@ class AudioController {
   }
 
   Future<void> stopAudioThread() async {
-    logger.t('stopAudioThread: started=$_isStarted, useIsolate=$_useIsolate');
+    logger.t('stopAudioThread: started=$_isStarted');
     // Stop interruption subscription
     try {
       await _interruptionSub?.cancel();
     } catch (_) {}
     _interruptionSub = null;
-    if (_useIsolate) {
-      // Only attempt to send stop if isolate was fully initialized
-      if (_isolateInitialized) {
-        try {
-          _audioSendPort.send({'cmd': 'stop'});
-        } catch (_) {}
-      }
-      final exitPort = _isolateExitPort;
-      if (exitPort != null) {
-        try {
-          // Wait briefly for the isolate to exit after cleanup
-          await exitPort.first.timeout(const Duration(seconds: 2));
-        } catch (_) {}
-      } else {
-        await Future<void>.delayed(const Duration(milliseconds: 25));
-      }
 
-      try {
-        _receivePort?.close();
-      } catch (_) {}
-      _receivePort = null;
-      try {
-        _isolateExitPort?.close();
-      } catch (_) {}
-      _isolateExitPort = null;
-      _isolateInitialized = false;
-    } else {
-      // Stop input stream if it was started
-      try {
-        if (_recordStreamStarted) {
-          await record.stop();
-        }
-      } catch (_) {}
-      _recordStreamStarted = false;
-      // Dispose may be safe to call repeatedly in the plugin; ignore errors
-      try {
-        await record.dispose();
-      } catch (_) {}
-      // Only uninit output if it was previously initialized
-      try {
-        if (_audioStreamInitialized) {
-          _audioStream.uninit();
-        }
-      } catch (_) {}
-      _audioStreamInitialized = false;
-    }
+    try {
+      await _recordStreamSub?.cancel();
+    } catch (_) {}
+    _recordStreamSub = null;
+
+    // Stop input stream if it was started
+    try {
+      if (_recordStreamStarted) {
+        await _recorder?.stop();
+      }
+    } catch (_) {}
+    _recordStreamStarted = false;
+
+    try {
+      await _recorder?.dispose();
+    } catch (_) {}
+    _recorder = null;
+
+    // Deactivate audio session when possible
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (_) {}
+
+    // Only uninit output if it was previously initialized
+    try {
+      if (_audioStreamInitialized) {
+        _audioStream.uninit();
+      }
+    } catch (_) {}
+    _audioStreamInitialized = false;
+
     _isStarted = false;
   }
 
   void dispose() {
     unawaited(stopAudioThread());
-  }
-}
-
-// Entry point for the processing isolate (for non-Android and non-Web)
-void _audioIsolateEntry(SendPort mainSendPort) async {
-  final port = ReceivePort();
-  mainSendPort.send(port.sendPort);
-
-  final AudioStream audioStream = getAudioStream();
-  const PCMFormat format = PCMFormat.f32le;
-  int sampleRate = 48000;
-  const RecorderChannels channels = RecorderChannels.stereo;
-  final recorder = Recorder.instance;
-  bool running = true;
-  bool isPlayingTone = false;
-
-  // Initialize the audio stream in the isolate
-  Future<void> initAudio({int? preferredSampleRate}) async {
-    logger.t('Initializing audio in isolate');
-    if (preferredSampleRate != null && preferredSampleRate > 0) {
-      sampleRate = preferredSampleRate;
-    }
-    audioStream.init(
-      waitingBufferMilliSec: 0,
-      bufferMilliSec: 500,
-      sampleRate: sampleRate,
-      channels: 2,
-    );
-
-    // Ensure output is active
-    audioStream.resume();
-  }
-
-  // Runs audio capture using record
-  Future<void> runAudioInput(
-      {dynamic selectedDevice, int? preferredSampleRate}) async {
-    logger.t('Running audio input on $defaultTargetPlatform in isolate');
-    var allDevices = recorder.listCaptureDevices();
-    logger.t(allDevices.map((dev) => (dev as dynamic).name).toString());
-
-    dynamic device;
-    if (selectedDevice != null) {
-      for (var dev in allDevices) {
-        if ((dev as dynamic).name == (selectedDevice as dynamic).name) {
-          device = dev;
-          break;
-        }
-      }
-      if (device != null) {
-        logger.t('Using selected device: ${(device as dynamic).name}');
-      } else {
-        logger.t('Selected device not found, using first available');
-        device = allDevices.first;
-      }
-    } else {
-      device = allDevices.first;
-      logger.t('Auto-selected first device: ${(device as dynamic).name}');
-    }
-
-    if (preferredSampleRate != null && preferredSampleRate > 0) {
-      sampleRate = preferredSampleRate;
-    }
-
-    await recorder.init(
-      format: format,
-      sampleRate: sampleRate,
-      channels: channels,
-      deviceID: (device as dynamic).id,
-    );
-
-    recorder.start();
-    recorder.uint8ListStream.listen((data) {
-      if (!running || isPlayingTone) return;
-      audioStream.push(data.toF32List(from: format));
-    });
-
-    recorder.startStreamingData();
-  }
-
-  await for (var message in port) {
-    if (message is Map) {
-      logger.t('message: $message');
-      switch (message['cmd']) {
-        case 'init':
-          await initAudio(
-              preferredSampleRate: message['preferredSampleRate'] as int?);
-          runAudioInput(
-            selectedDevice: message['selectedDevice'],
-            preferredSampleRate: message['preferredSampleRate'] as int?,
-          );
-          break;
-        case 'playTestTone':
-          try {
-            isPlayingTone = true;
-            final int frequency = (message['frequency'] as int?) ?? 440;
-            final int durationSeconds =
-                (message['durationSeconds'] as int?) ?? 1;
-            final int framesPerSecond = sampleRate;
-            const int channelsCount = 2;
-            const double amplitude = 0.2;
-            final double twoPi = 2 * math.pi;
-            final double phaseIncrement = twoPi * frequency / framesPerSecond;
-            double phase = 0;
-
-            // Push smaller chunks (~50ms) to avoid overflowing small buffers
-            final int chunkFrames = (framesPerSecond / 20).floor();
-            final int totalChunks = durationSeconds * 20;
-            for (int chunk = 0; chunk < totalChunks; chunk++) {
-              final Float32List buffer =
-                  Float32List(chunkFrames * channelsCount);
-              int writeIndex = 0;
-              for (int n = 0; n < chunkFrames; n++) {
-                final sample = (math.sin(phase) * amplitude).toDouble();
-                phase += phaseIncrement;
-                if (phase >= twoPi) phase -= twoPi;
-                buffer[writeIndex++] = sample;
-                buffer[writeIndex++] = sample;
-              }
-              audioStream.push(buffer);
-              if (chunk < totalChunks - 1) {
-                await Future.delayed(const Duration(milliseconds: 50));
-              }
-            }
-          } catch (_) {
-            // Ignore errors
-          }
-          isPlayingTone = false;
-          break;
-        case 'stop':
-          try {
-            recorder.stop();
-          } catch (_) {}
-          try {
-            recorder.deinit();
-          } catch (_) {}
-          try {
-            audioStream.uninit();
-          } catch (_) {}
-          running = false;
-          try {
-            port.close();
-          } catch (_) {}
-          Isolate.exit();
-        default:
-          break;
-      }
-    }
   }
 }
