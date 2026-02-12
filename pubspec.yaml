@@ -34,7 +34,6 @@ dependencies:
   flutter_libserialport: ^0.6.0
   #audio
   mp_audio_stream: ^0.2.2
-  flutter_recorder: ^1.1.2
   record: ^6.2.0
   permission_handler: ^12.0.1
   flutter_inappwebview: ^6.2.0-beta.3
@@ -64,6 +63,8 @@ dependency_overrides:
       ref: master
   package_info_plus: ^8.3.1
   device_info_plus: ^11.5.0
+  universal_io: ^2.3.1
+  shared_preferences: ^2.5.4
 
 dev_dependencies:
   flutter_test:

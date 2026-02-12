@@ -1,5 +1,7 @@
 // Telemetry class for tracking anonymous usage
-import 'package:aptabase_flutter/aptabase_flutter.dart';
+import 'dart:async';
+
+import 'telemetry_backend.dart' as backend;
 
 class Telemetry {
   Telemetry._();
@@ -17,11 +19,7 @@ class Telemetry {
       return;
     }
     try {
-      await Aptabase.init(
-        appKey,
-        InitOptions(printDebugMessages: debug),
-      );
-      _initialized = true;
+      _initialized = await backend.telemetryInit(appKey, debug: debug);
     } catch (_) {
       _initialized = false;
     }
@@ -37,7 +35,8 @@ class Telemetry {
         ..._globalProps,
         if (props != null) ...props,
       };
-      await Aptabase.instance.trackEvent(eventName, mergedProps);
+      // Don't block UI on telemetry
+      unawaited(backend.telemetrySend(eventName, mergedProps));
     } catch (_) {}
   }
 
