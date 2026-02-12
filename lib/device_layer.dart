@@ -417,7 +417,9 @@ class DeviceLayer {
   // Close the device layer
   Future<void> close() async {
     _buffer = Uint8List(0);
-    _serialHelper.closePort();
+    try {
+      await _serialHelper.closePort();
+    } catch (_) {}
     await _receiveController.close();
   }
 
