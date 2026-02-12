@@ -137,12 +137,15 @@ class OrbitApp extends StatelessWidget {
             builder: (context, child) {
               // Apply UI scaling when the scale setting is changed
               final mq = MediaQuery.of(context);
-              final scale = appState.textScale <= 0 ? 1.0 : appState.textScale;
+              final double effectiveScale =
+                  (appState.textScale <= 0 ? 1.0 : appState.textScale)
+                      .clamp(0.6, 2.0)
+                      .toDouble();
               return MediaQuery(
                 data: mq.copyWith(
-                  textScaler: TextScaler.linear(scale),
+                  textScaler: TextScaler.linear(effectiveScale),
                   // Apply additional scaling to overall pixel ratio
-                  devicePixelRatio: mq.devicePixelRatio * scale,
+                  devicePixelRatio: mq.devicePixelRatio * effectiveScale,
                 ),
                 child: child ?? const SizedBox.shrink(),
               );
@@ -1244,7 +1247,11 @@ class MainPageState extends State<MainPage> with WindowListener {
         _lastOnAirPromptAt != null) {
       final hasSong = appState.favoritesOnAirEntries
           .any((e) => e.type == FavoriteType.song);
-      final label = 'Favorite ${hasSong ? 'Song' : 'Artist'} On Air';
+      final bool smallPortrait =
+          appState.smallScreenMode && !isLandscape(context);
+      final label = smallPortrait
+          ? 'Fav ${hasSong ? 'Song' : 'Artist'}'
+          : 'Favorite ${hasSong ? 'Song' : 'Artist'} On Air';
       final colorScheme = Theme.of(context).colorScheme;
       return TextButton.icon(
         onPressed: () {
@@ -1286,11 +1293,15 @@ class MainPageState extends State<MainPage> with WindowListener {
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, appState, child) {
+        final int activePresets =
+            appState.presets.where((p) => p.sid != 0).length;
+        final bool bigAppBar = appState.smallScreenMode && isLandscape(context);
         return Stack(
           children: [
             Scaffold(
               resizeToAvoidBottomInset: false,
               appBar: AppBar(
+                toolbarHeight: bigAppBar ? 76 : kToolbarHeight,
                 title: _buildAppBarTitle(context, appState),
                 centerTitle: true,
                 leading: IconButton(
@@ -1298,6 +1309,12 @@ class MainPageState extends State<MainPage> with WindowListener {
                     appState.signalQuality,
                     isAntennaConnected: appState.isAntennaConnected,
                   )),
+                  iconSize: bigAppBar ? 32 : 24,
+                  padding: EdgeInsets.all(bigAppBar ? 14 : 8),
+                  constraints: BoxConstraints(
+                    minWidth: bigAppBar ? 64 : 48,
+                    minHeight: bigAppBar ? 64 : 48,
+                  ),
                   tooltip: appState.isAntennaConnected
                       ? 'Signal quality'
                       : 'No antenna',
@@ -1310,8 +1327,114 @@ class MainPageState extends State<MainPage> with WindowListener {
                   },
                 ),
                 actions: [
+                  if (appState.smallScreenMode) ...[
+                    IconButton(
+                      tooltip: appState.isScanActive
+                          ? 'Stop and Listen'
+                          : (activePresets >= 2
+                              ? 'Scan Presets'
+                              : 'Not Enough Presets'),
+                      icon: Icon(
+                        appState.isScanActive ? Icons.close : Icons.scanner,
+                      ),
+                      iconSize: bigAppBar ? 30 : 24,
+                      padding: EdgeInsets.all(bigAppBar ? 14 : 8),
+                      constraints: BoxConstraints(
+                        minWidth: bigAppBar ? 64 : 48,
+                        minHeight: bigAppBar ? 64 : 48,
+                      ),
+                      onPressed: (appState.isScanActive || activePresets >= 2)
+                          ? () {
+                              if (appState.isScanActive) {
+                                final cfgCmd = SXiSelectChannelCommand(
+                                  ChanSelectionType
+                                      .stopScanAndContinuePlaybackOfCurrentTrack,
+                                  0,
+                                  appState.currentCategory,
+                                  ChannelAttributes.all(),
+                                  AudioRoutingType.routeToAudio,
+                                );
+                                deviceLayer.sendControlCommand(cfgCmd);
+                              } else {
+                                final cfgCmd = SXiSelectChannelCommand(
+                                  ChanSelectionType
+                                      .scanSmartFavoriteMusicOnlyContent,
+                                  0,
+                                  appState.currentCategory,
+                                  ChannelAttributes.all(),
+                                  AudioRoutingType.routeToAudio,
+                                );
+                                deviceLayer.sendControlCommand(cfgCmd);
+                              }
+                            }
+                          : null,
+                    ),
+                    IconButton(
+                      tooltip: appState.updatingChannels
+                          ? 'Channel Update in Progress'
+                          : 'Program Guide',
+                      icon: const Icon(Icons.view_list),
+                      iconSize: bigAppBar ? 30 : 24,
+                      padding: EdgeInsets.all(bigAppBar ? 14 : 8),
+                      constraints: BoxConstraints(
+                        minWidth: bigAppBar ? 64 : 48,
+                        minHeight: bigAppBar ? 64 : 48,
+                      ),
+                      onPressed: appState.updatingChannels
+                          ? null
+                          : () {
+                              _showSelectChannelFromEPG();
+                            },
+                    ),
+                    IconButton(
+                      tooltip: appState.isTuneMixActive
+                          ? 'Stop Mix'
+                          : (activePresets >= 2
+                              ? 'Start Presets Mix'
+                              : 'Not Enough Presets'),
+                      icon: Icon(
+                        appState.isTuneMixActive ? Icons.close : Icons.shuffle,
+                      ),
+                      iconSize: bigAppBar ? 30 : 24,
+                      padding: EdgeInsets.all(bigAppBar ? 14 : 8),
+                      constraints: BoxConstraints(
+                        minWidth: bigAppBar ? 64 : 48,
+                        minHeight: bigAppBar ? 64 : 48,
+                      ),
+                      onPressed:
+                          (appState.isTuneMixActive || activePresets >= 2)
+                              ? () {
+                                  if (appState.isTuneMixActive) {
+                                    final cfgCmd = SXiSelectChannelCommand(
+                                      ChanSelectionType.tuneUsingChannelNumber,
+                                      appState.currentChannel,
+                                      appState.currentCategory,
+                                      ChannelAttributes.all(),
+                                      AudioRoutingType.routeToAudio,
+                                    );
+                                    deviceLayer.sendControlCommand(cfgCmd);
+                                  } else {
+                                    final cfgCmd = SXiSelectChannelCommand(
+                                      ChanSelectionType.tuneUsingSID,
+                                      0x1001,
+                                      appState.currentCategory,
+                                      ChannelAttributes.all(),
+                                      AudioRoutingType.routeToAudio,
+                                    );
+                                    deviceLayer.sendControlCommand(cfgCmd);
+                                  }
+                                }
+                              : null,
+                    ),
+                  ],
                   IconButton(
                     icon: const Icon(Icons.settings),
+                    iconSize: bigAppBar ? 30 : 24,
+                    padding: EdgeInsets.all(bigAppBar ? 14 : 8),
+                    constraints: BoxConstraints(
+                      minWidth: bigAppBar ? 64 : 48,
+                      minHeight: bigAppBar ? 64 : 48,
+                    ),
                     onPressed: () {
                       Navigator.push(
                         context,
@@ -1334,13 +1457,15 @@ class MainPageState extends State<MainPage> with WindowListener {
                           children: [
                             Expanded(
                               child: Center(
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(maxWidth: 700),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      // Channel info
-                                      GestureDetector(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    // Channel info
+                                    () {
+                                      final bool smallLandscape =
+                                          appState.smallScreenMode;
+                                      final Widget channelCenter =
+                                          GestureDetector(
                                         onTap: () {
                                           ChannelInfoDialog.show(
                                             context,
@@ -1363,172 +1488,210 @@ class MainPageState extends State<MainPage> with WindowListener {
                                             },
                                           );
                                         },
-                                        child: // Channel info
-                                            currentChannelImage != null
-                                                ? ConstrainedBox(
-                                                    constraints: BoxConstraints(
-                                                      maxWidth: 400,
-                                                      maxHeight: 60,
-                                                    ),
-                                                    child: currentChannelImage!,
-                                                  )
-                                                : Container(
-                                                    height: 60,
-                                                    width: 400,
-                                                    alignment: Alignment.center,
-                                                    child: Text(
-                                                      appState.nowPlaying
-                                                          .channelName,
-                                                      textAlign:
-                                                          TextAlign.center,
-                                                      style: TextStyle(
-                                                        fontSize: 32,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
+                                        child: currentChannelImage != null
+                                            ? ConstrainedBox(
+                                                constraints:
+                                                    const BoxConstraints(
+                                                  maxWidth: 400,
+                                                  maxHeight: 60,
+                                                ),
+                                                child: currentChannelImage!,
+                                              )
+                                            : ConstrainedBox(
+                                                constraints:
+                                                    const BoxConstraints(
+                                                  maxWidth: 400,
+                                                  maxHeight: 60,
+                                                ),
+                                                child: Text(
+                                                  appState
+                                                      .nowPlaying.channelName,
+                                                  textAlign: TextAlign.center,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    fontSize:
+                                                        appState.smallScreenMode
+                                                            ? 20
+                                                            : 32,
+                                                    fontWeight: FontWeight.bold,
                                                   ),
-                                      ),
+                                                ),
+                                              ),
+                                      );
 
-                                      SizedBox(height: 40),
-                                      // Main content: Album art + info
-                                      Row(
+                                      if (!smallLandscape) {
+                                        return channelCenter;
+                                      }
+
+                                      return Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.center,
                                         children: [
-                                          // Album Art
-                                          GestureDetector(
-                                            onTap: () {
-                                              FavoriteDialogHelper.show(
-                                                context: context,
-                                                appState: appState,
-                                                deviceLayer: deviceLayer,
-                                              );
-                                            },
-                                            child: AlbumArt(
-                                              size: 180,
-                                              filterQuality: FilterQuality.high,
-                                              imageBytes: appState
-                                                      .nowPlaying.image.isEmpty
-                                                  ? null
-                                                  : appState.nowPlaying.image,
-                                              borderRadius: 8.0,
-                                              borderWidth: 2.0,
-                                              placeholder: Icon(
-                                                getCategoryIcon(
+                                          _buildChannelBrowseButton(left: true),
+                                          const SizedBox(width: 10),
+                                          _buildChannelNumberInput(
+                                              bigControls: true),
+                                          const SizedBox(width: 20),
+                                          channelCenter,
+                                          const SizedBox(width: 10),
+                                          _buildChannelBrowseButton(
+                                              left: false),
+                                        ],
+                                      );
+                                    }(),
+
+                                    SizedBox(
+                                        height:
+                                            appState.smallScreenMode ? 16 : 40),
+                                    // Main content: Album art + info
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        // Album Art
+                                        GestureDetector(
+                                          onTap: () {
+                                            FavoriteDialogHelper.show(
+                                              context: context,
+                                              appState: appState,
+                                              deviceLayer: deviceLayer,
+                                            );
+                                          },
+                                          child: AlbumArt(
+                                            size: appState.smallScreenMode
+                                                ? 140
+                                                : 180,
+                                            filterQuality: FilterQuality.high,
+                                            imageBytes: appState
+                                                    .nowPlaying.image.isEmpty
+                                                ? null
+                                                : appState.nowPlaying.image,
+                                            borderRadius: 8.0,
+                                            borderWidth: 2.0,
+                                            placeholder: Icon(
+                                              getCategoryIcon(
+                                                appState.currentCategoryString,
+                                              ),
+                                              size: 64,
+                                            ),
+                                          ),
+                                        ),
+                                        SizedBox(width: 36),
+                                        // Song Info
+                                        Flexible(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.center,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              TextButton(
+                                                onPressed: () {
+                                                  _showSelectChannelFromEPG(
+                                                    initialCategory: appState
+                                                        .currentCategory,
+                                                  );
+                                                },
+                                                child: Text(
                                                   appState
                                                       .currentCategoryString,
+                                                  style:
+                                                      TextStyle(fontSize: 20),
                                                 ),
-                                                size: 64,
                                               ),
-                                            ),
-                                          ),
-                                          SizedBox(width: 36),
-                                          // Song Info
-                                          Flexible(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.center,
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                TextButton(
-                                                  onPressed: () {
-                                                    _showSelectChannelFromEPG(
-                                                      initialCategory: appState
-                                                          .currentCategory,
-                                                    );
-                                                  },
-                                                  child: Text(
-                                                    appState
-                                                        .currentCategoryString,
-                                                    style:
-                                                        TextStyle(fontSize: 20),
+                                              SizedBox(height: 8),
+                                              GestureDetector(
+                                                onTap: () {
+                                                  FavoriteDialogHelper.show(
+                                                    context: context,
+                                                    appState: appState,
+                                                    deviceLayer: deviceLayer,
+                                                  );
+                                                },
+                                                child: Text(
+                                                  appState.nowPlaying.songTitle,
+                                                  style: TextStyle(
+                                                    fontSize: 28,
+                                                    fontWeight: FontWeight.bold,
                                                   ),
+                                                  maxLines:
+                                                      appState.smallScreenMode
+                                                          ? 1
+                                                          : 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  textAlign: TextAlign.center,
                                                 ),
-                                                SizedBox(height: 8),
-                                                GestureDetector(
-                                                  onTap: () {
-                                                    FavoriteDialogHelper.show(
-                                                      context: context,
-                                                      appState: appState,
-                                                      deviceLayer: deviceLayer,
-                                                    );
-                                                  },
-                                                  child: Text(
-                                                    appState
-                                                        .nowPlaying.songTitle,
-                                                    style: TextStyle(
-                                                      fontSize: 28,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                                    maxLines: 2,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    textAlign: TextAlign.center,
+                                              ),
+                                              SizedBox(height: 8),
+                                              GestureDetector(
+                                                onTap: () {
+                                                  FavoriteDialogHelper.show(
+                                                    context: context,
+                                                    appState: appState,
+                                                    deviceLayer: deviceLayer,
+                                                  );
+                                                },
+                                                child: Text(
+                                                  appState
+                                                      .nowPlaying.artistTitle,
+                                                  style: TextStyle(
+                                                    fontSize: 20,
+                                                    color: Colors.grey,
                                                   ),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  textAlign: TextAlign.center,
                                                 ),
-                                                SizedBox(height: 8),
-                                                GestureDetector(
-                                                  onTap: () {
-                                                    FavoriteDialogHelper.show(
-                                                      context: context,
-                                                      appState: appState,
-                                                      deviceLayer: deviceLayer,
-                                                    );
-                                                  },
-                                                  child: Text(
-                                                    appState
-                                                        .nowPlaying.artistTitle,
-                                                    style: TextStyle(
-                                                      fontSize: 20,
-                                                      color: Colors.grey,
-                                                    ),
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    textAlign: TextAlign.center,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
+                                              ),
+                                            ],
                                           ),
-                                        ],
-                                      ),
-                                      SizedBox(height: 40),
-                                      // Controls: Channel + Playback in one row
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          // Channel Controls
-                                          _buildChannelControls(),
-                                          SizedBox(width: 32),
-                                          // Vertical Separator
-                                          Container(
-                                            width: 1,
-                                            height: 60,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .outline
-                                                .withValues(alpha: 0.3),
-                                          ),
-                                          SizedBox(width: 32),
-                                          // Playback Controls
-                                          _buildPlaybackControls(),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
+                                    ),
+                                    SizedBox(
+                                        height:
+                                            appState.smallScreenMode ? 16 : 40),
+                                    // Channel and Playback in one row
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: appState.smallScreenMode
+                                          ? <Widget>[
+                                              _buildPlaybackControls(),
+                                            ]
+                                          : <Widget>[
+                                              // Channel Controls
+                                              _buildChannelControls(),
+                                              SizedBox(width: 32),
+                                              // Vertical Separator
+                                              Container(
+                                                width: 1,
+                                                height: 60,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .outline
+                                                    .withValues(alpha: 0.3),
+                                              ),
+                                              SizedBox(width: 32),
+                                              // Playback Controls
+                                              _buildPlaybackControls(),
+                                            ],
+                                    ),
+                                    if (!appState.smallScreenMode) ...[
                                       const SizedBox(height: 12),
                                       // Contextual actions
                                       _buildActionButtons(isLandscape: true),
-                                      // Transport slider (space reserved to avoid layout shift)
-                                      SizedBox(height: 12),
-                                      _buildTransportArea(),
                                     ],
-                                  ),
+                                    if (!appState.smallScreenMode)
+                                      const SizedBox(height: 12),
+                                    _buildTransportArea(),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1659,6 +1822,10 @@ class MainPageState extends State<MainPage> with WindowListener {
                               child: Text(
                                 appState.nowPlaying.songTitle,
                                 style: TextStyle(fontSize: 20),
+                                maxLines: appState.smallScreenMode ? 1 : null,
+                                overflow: appState.smallScreenMode
+                                    ? TextOverflow.ellipsis
+                                    : null,
                               ),
                             ),
                             // Current artist
@@ -1674,6 +1841,10 @@ class MainPageState extends State<MainPage> with WindowListener {
                                 appState.nowPlaying.artistTitle,
                                 style:
                                     TextStyle(fontSize: 18, color: Colors.grey),
+                                maxLines: appState.smallScreenMode ? 1 : null,
+                                overflow: appState.smallScreenMode
+                                    ? TextOverflow.ellipsis
+                                    : null,
                               ),
                             ),
                             const SizedBox(height: 10),
@@ -1681,8 +1852,10 @@ class MainPageState extends State<MainPage> with WindowListener {
                             _buildPlaybackControls(),
                             //  Channel control
                             _buildChannelControls(),
-                            const SizedBox(height: 10),
-                            _buildActionButtons(isLandscape: false),
+                            if (!appState.smallScreenMode) ...[
+                              const SizedBox(height: 10),
+                              _buildActionButtons(isLandscape: false),
+                            ],
                             _buildTransportArea(),
                             Expanded(
                               child: PresetCarousel(
@@ -2121,6 +2294,16 @@ class MainPageState extends State<MainPage> with WindowListener {
 
   // Build the playback controls
   Widget _buildPlaybackControls() {
+    final bool small = appState.smallScreenMode;
+    final bool bigControls = small && isLandscape(context);
+    final double favoriteIconSize = bigControls ? 36 : 28;
+    final double transportIconSize = bigControls ? 54 : 36;
+    final EdgeInsetsGeometry iconPadding = EdgeInsets.all(bigControls ? 14 : 8);
+    final BoxConstraints iconConstraints = BoxConstraints(
+      minWidth: bigControls ? 64 : 48,
+      minHeight: bigControls ? 64 : 48,
+    );
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -2128,7 +2311,9 @@ class MainPageState extends State<MainPage> with WindowListener {
           // Favorite toggle button
           IconButton(
             tooltip: 'Favorite',
-            iconSize: 28,
+            iconSize: favoriteIconSize,
+            padding: iconPadding,
+            constraints: iconConstraints,
             icon: Icon(
               appState.isNowPlayingSongFavorited() ||
                       appState.isNowPlayingArtistFavorited()
@@ -2152,7 +2337,9 @@ class MainPageState extends State<MainPage> with WindowListener {
         // Rev button
         IconButton(
           icon: const Icon(Icons.skip_previous),
-          iconSize: 36,
+          iconSize: transportIconSize,
+          padding: iconPadding,
+          constraints: iconConstraints,
           onPressed: () {
             audioServiceHandler?.rewind();
           },
@@ -2167,7 +2354,9 @@ class MainPageState extends State<MainPage> with WindowListener {
                   ? Icons.play_arrow
                   : Icons.pause,
             ),
-            iconSize: 36,
+            iconSize: transportIconSize,
+            padding: iconPadding,
+            constraints: iconConstraints,
             onPressed: () {
               if (appState.playbackState == AppPlaybackState.paused ||
                   appState.playbackState == AppPlaybackState.stopped) {
@@ -2181,7 +2370,9 @@ class MainPageState extends State<MainPage> with WindowListener {
         // Forward button
         IconButton(
           icon: const Icon(Icons.skip_next),
-          iconSize: 36,
+          iconSize: transportIconSize,
+          padding: iconPadding,
+          constraints: iconConstraints,
           onPressed: appState.playbackState == AppPlaybackState.live
               ? null
               : () {
@@ -2193,6 +2384,10 @@ class MainPageState extends State<MainPage> with WindowListener {
         if (appState.isScanActive) ...[
           // Scan mode, Stop and Listen
           TextButton(
+            style: TextButton.styleFrom(
+              minimumSize: Size(bigControls ? 92 : 64, bigControls ? 64 : 48),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
             onPressed: () {
               final cfgCmd = SXiSelectChannelCommand(
                 ChanSelectionType
@@ -2209,6 +2404,10 @@ class MainPageState extends State<MainPage> with WindowListener {
         ] else if (appState.isTuneMixActive) ...[
           // TuneMix mode, Last Listened
           TextButton(
+            style: TextButton.styleFrom(
+              minimumSize: Size(bigControls ? 92 : 64, bigControls ? 64 : 48),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
             onPressed: appState.playbackState == AppPlaybackState.live
                 ? null
                 : () {
@@ -2219,6 +2418,10 @@ class MainPageState extends State<MainPage> with WindowListener {
         ] else ...[
           // Regular listening mode, LIVE
           TextButton(
+            style: TextButton.styleFrom(
+              minimumSize: Size(bigControls ? 92 : 64, bigControls ? 64 : 48),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
             onPressed: appState.playbackState == AppPlaybackState.live
                 ? null
                 : () {
@@ -2231,10 +2434,102 @@ class MainPageState extends State<MainPage> with WindowListener {
     );
   }
 
+  Widget _buildChannelBrowseButton({required bool left}) {
+    final bool bigControls = appState.smallScreenMode && isLandscape(context);
+    final double iconSize = bigControls ? 40 : 24;
+    final EdgeInsetsGeometry padding = EdgeInsets.all(bigControls ? 14 : 8);
+    final BoxConstraints constraints = BoxConstraints(
+      minWidth: bigControls ? 64 : 48,
+      minHeight: bigControls ? 64 : 48,
+    );
+
+    return IconButton(
+      tooltip: left ? 'Previous channel' : 'Next channel',
+      iconSize: iconSize,
+      padding: padding,
+      constraints: constraints,
+      icon: Icon(left ? Icons.chevron_left : Icons.chevron_right),
+      onPressed: () {
+        final cfgCmd = SXiSelectChannelCommand(
+          left
+              ? ChanSelectionType.tuneToNextLowerChannelNumberInCategory
+              : ChanSelectionType.tuneToNextHigherChannelNumberInCategory,
+          appState.nowPlaying.channelNumber,
+          0xFF,
+          ChannelAttributes.all(),
+          AudioRoutingType.routeToAudio,
+        );
+        deviceLayer.sendControlCommand(cfgCmd);
+      },
+    );
+  }
+
+  Widget _buildChannelNumberInput({required bool bigControls}) {
+    final double textFieldWidth = bigControls ? 92.0 : 100.0;
+    final double? controlHeight = bigControls ? 64.0 : null;
+
+    final inputDecoration = bigControls
+        ? const InputDecoration(
+            border: OutlineInputBorder(),
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 10),
+          )
+        : const InputDecoration(
+            border: OutlineInputBorder(),
+          );
+
+    final field = TextField(
+      controller: channelTextController,
+      focusNode: channelTextFocusNode,
+      textAlign: TextAlign.center,
+      textAlignVertical: TextAlignVertical.center,
+      style: TextStyle(fontSize: bigControls ? 22 : 16),
+      decoration: inputDecoration,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      onSubmitted: (value) {
+        int? channel = int.tryParse(value);
+        if (channel != null) {
+          final cfgCmd = SXiSelectChannelCommand(
+            ChanSelectionType.tuneUsingChannelNumber,
+            channel,
+            0xFF,
+            ChannelAttributes.all(),
+            AudioRoutingType.routeToAudio,
+          );
+          deviceLayer.sendControlCommand(cfgCmd);
+        }
+      },
+      onTap: () {
+        channelTextController.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: channelTextController.text.length,
+        );
+      },
+      onTapOutside: (_) {
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+    );
+
+    return SizedBox(
+      width: textFieldWidth,
+      height: controlHeight,
+      child: field,
+    );
+  }
+
   // Build the channel controls
   Widget _buildChannelControls() {
-    final spacing = 20.0;
-    final textFieldWidth = 100.0;
+    final bool small = appState.smallScreenMode;
+    // Keep original sizing unless we're in small-screen landscape
+    final double spacing = 20.0;
+    const double textFieldWidth = 100.0;
+
+    final bool smallLandscape = small && isLandscape(context);
+    if (smallLandscape) {
+      // In small-screen landscape, browse and input are shown in the header row
+      return const SizedBox.shrink();
+    }
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -2256,36 +2551,7 @@ class MainPageState extends State<MainPage> with WindowListener {
         SizedBox(width: spacing),
         SizedBox(
           width: textFieldWidth,
-          child: TextField(
-            controller: channelTextController,
-            focusNode: channelTextFocusNode,
-            textAlign: TextAlign.center,
-            decoration: InputDecoration(border: const OutlineInputBorder()),
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            onSubmitted: (value) {
-              int? channel = int.tryParse(value);
-              if (channel != null) {
-                final cfgCmd = SXiSelectChannelCommand(
-                  ChanSelectionType.tuneUsingChannelNumber,
-                  channel,
-                  0xFF,
-                  ChannelAttributes.all(),
-                  AudioRoutingType.routeToAudio,
-                );
-                deviceLayer.sendControlCommand(cfgCmd);
-              }
-            },
-            onTap: () {
-              channelTextController.selection = TextSelection(
-                baseOffset: 0,
-                extentOffset: channelTextController.text.length,
-              );
-            },
-            onTapOutside: (_) {
-              FocusManager.instance.primaryFocus?.unfocus();
-            },
-          ),
+          child: _buildChannelNumberInput(bigControls: false),
         ),
         SizedBox(width: spacing),
         ElevatedButton.icon(
@@ -2309,6 +2575,9 @@ class MainPageState extends State<MainPage> with WindowListener {
 
   // Build the transport slider
   Widget _buildTransportSlider() {
+    if (appState.smallScreenMode) {
+      return const SizedBox.shrink();
+    }
     if (appState.playbackState == AppPlaybackState.live ||
         appState.isTuneMixActive) {
       return const SizedBox.shrink();
@@ -2491,8 +2760,15 @@ class MainPageState extends State<MainPage> with WindowListener {
 
   // Build the transport area
   Widget _buildTransportArea() {
-    const double areaHeight = 56;
     final bool showAired = appState.isScanActive || appState.isTuneMixActive;
+    if (appState.smallScreenMode) {
+      if (showAired) {
+        return SizedBox(height: 28, child: _buildAiredInfo());
+      }
+      return const SizedBox.shrink();
+    }
+
+    const double areaHeight = 56;
     final bool showSlider =
         appState.playbackState != AppPlaybackState.live && !showAired;
     return SizedBox(

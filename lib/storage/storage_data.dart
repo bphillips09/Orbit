@@ -97,6 +97,7 @@ class StorageData {
       case SaveDataType.detectAudioInterruptions:
       case SaveDataType.sxmToken:
       case SaveDataType.useNativeAuxInput:
+      case SaveDataType.smallScreenMode:
         record[key] = value;
         break;
     }
@@ -154,6 +155,7 @@ class StorageData {
       case SaveDataType.detectAudioInterruptions:
       case SaveDataType.sxmToken:
       case SaveDataType.useNativeAuxInput:
+      case SaveDataType.smallScreenMode:
         return record[key];
     }
   }
@@ -286,5 +288,6 @@ enum SaveDataType {
   analyticsDisabled,
   detectAudioInterruptions,
   sxmToken,
-  useNativeAuxInput
+  useNativeAuxInput,
+  smallScreenMode
 }

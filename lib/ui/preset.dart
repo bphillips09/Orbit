@@ -512,6 +512,60 @@ class PresetCarouselState extends State<PresetCarousel> {
       final double lineHeight = isLandscapeMode ? 24 : 20;
       final double graphicHeightOffset = 1.4 / appState.textScale;
       final double graphicAreaHeight = lineHeight * graphicHeightOffset;
+      final bool smallScreenMode = appState.smallScreenMode;
+
+      // Small screen mode
+      if (smallScreenMode) {
+        if (isLandscapeMode) {
+          final double logoHeight = 44;
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+            child: Center(
+              child: hasLogo
+                  ? Image.memory(
+                      logoBytes,
+                      cacheHeight: 120,
+                      height: logoHeight,
+                      fit: BoxFit.fitWidth,
+                      gaplessPlayback: true,
+                      filterQuality: FilterQuality.medium,
+                    )
+                  : Text(
+                      isLoading ? 'Loading...' : preset.channelName,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: fontSize + 2,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                      maxLines: 1,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+            ),
+          );
+        }
+
+        // Portrait: channel number only
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                isLoading ? '...' : '${preset.channelNumber}',
+                style: TextStyle(
+                  fontSize: fontSize,
+                  fontWeight: FontWeight.w800,
+                  color: theme.colorScheme.onSurface,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        );
+      }
 
       return Padding(
         padding: EdgeInsets.symmetric(

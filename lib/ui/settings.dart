@@ -184,6 +184,16 @@ class SettingsPage extends StatelessWidget {
                 _buildScaleSelector(context, appState),
                 const SizedBox(height: 8),
                 _buildDesignHeightSelector(context, appState),
+                _buildSwitchTile(
+                  context,
+                  'Small Screen Mode',
+                  'Bigger UI for small screens',
+                  Icons.aspect_ratio,
+                  value: appState.smallScreenMode,
+                  onChanged: (value) {
+                    appState.updateSmallScreenMode(value);
+                  },
+                ),
               ],
             ),
             const SizedBox(height: sectionSpacing),

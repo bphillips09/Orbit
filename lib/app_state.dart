@@ -40,6 +40,7 @@ class AppState extends ChangeNotifier {
   bool welcomeSeen = false;
   bool debugMode = false;
   bool analyticsDisabled = false;
+  bool smallScreenMode = false;
   // Android-only: preferred audio output route
   String androidAudioOutputRoute = 'Speaker';
   bool detectAudioInterruptions = true;
@@ -357,6 +358,33 @@ class AppState extends ChangeNotifier {
     // Clamp to avoid extreme scaling causing invalid constraints
     uiScale = _clampDesignHeightForDevice(uiScale);
 
+    // Small screen mode
+    smallScreenMode = await storageData.load(
+      SaveDataType.smallScreenMode,
+      defaultValue: false,
+    );
+
+    if (smallScreenMode) {
+      const double desiredTextScale = 1.8;
+      const double desiredUiScale = 600.0;
+
+      final double nextTextScale =
+          (textScale < desiredTextScale) ? desiredTextScale : textScale;
+      final double nextUiScale =
+          (uiScale > desiredUiScale) ? desiredUiScale : uiScale;
+
+      if ((nextTextScale - textScale).abs() > 0.001) {
+        textScale = nextTextScale.clamp(0.6, 2.0);
+        await storageData.save(SaveDataType.textScale, textScale);
+      }
+
+      final double clampedUi = _clampDesignHeightForDevice(nextUiScale);
+      if ((clampedUi - uiScale).abs() > 0.001) {
+        uiScale = clampedUi;
+        await storageData.save(SaveDataType.interfaceScale, uiScale);
+      }
+    }
+
     // Apply current design height to scaled binding
     try {
       ScaledWidgetsFlutterBinding.instance.scaleFactor = (deviceSize) {
@@ -552,6 +580,49 @@ class AppState extends ChangeNotifier {
     try {
       Telemetry.setDisabled(disabled);
     } catch (_) {}
+    notifyListeners();
+  }
+
+  void updateSmallScreenMode(bool enabled) {
+    smallScreenMode = enabled;
+    storageData.save(SaveDataType.smallScreenMode, enabled);
+
+    if (enabled) {
+      const double desiredTextScale = 1.8;
+      const double desiredUiScale = 600.0;
+
+      if (textScale < desiredTextScale) {
+        textScale = desiredTextScale.clamp(0.6, 2.0);
+        storageData.save(SaveDataType.textScale, textScale);
+      }
+
+      if (uiScale > desiredUiScale) {
+        uiScale = _clampDesignHeightForDevice(desiredUiScale);
+        storageData.save(SaveDataType.interfaceScale, uiScale);
+        // Update binding scale factor so the change takes effect immediately
+        try {
+          ScaledWidgetsFlutterBinding.instance.scaleFactor = (deviceSize) {
+            return deviceSize.height / uiScale;
+          };
+        } catch (_) {}
+      }
+    } else {
+      // Reset scales back to defaults when disabling small screen mode
+      const double defaultTextScale = 1.0;
+      const double defaultUiScale = 720.0;
+
+      textScale = defaultTextScale;
+      storageData.save(SaveDataType.textScale, textScale);
+
+      uiScale = _clampDesignHeightForDevice(defaultUiScale);
+      storageData.save(SaveDataType.interfaceScale, uiScale);
+
+      try {
+        ScaledWidgetsFlutterBinding.instance.scaleFactor = (deviceSize) {
+          return deviceSize.height / uiScale;
+        };
+      } catch (_) {}
+    }
     notifyListeners();
   }
 
