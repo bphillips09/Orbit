@@ -218,12 +218,18 @@ class PresetCarouselState extends State<PresetCarousel> {
                           ? _navigationButtonWidth * 2
                           : 0.0;
                   final double effectiveWidth =
-                      availableWidth - navigationPadding;
+                      max(0.0, availableWidth - navigationPadding);
+                  final double effectiveHeight = max(0.0, availableHeight);
 
-                  final double itemWidth =
-                      (effectiveWidth - (itemsPerRow - 1) * 4) / itemsPerRow;
-                  final double itemHeight =
-                      (availableHeight - (rowsPerPage - 1) * 4) / rowsPerPage;
+                  // Clamp to avoid negative tight constraints
+                  final double itemWidth = max(
+                    0.0,
+                    (effectiveWidth - (itemsPerRow - 1) * 4) / itemsPerRow,
+                  );
+                  final double itemHeight = max(
+                    0.0,
+                    (effectiveHeight - (rowsPerPage - 1) * 4) / rowsPerPage,
+                  );
 
                   return Stack(
                     children: [
