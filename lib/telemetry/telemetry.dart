@@ -10,6 +10,8 @@ class Telemetry {
   static bool _disabled = false;
   static final Map<String, dynamic> _globalProps = <String, dynamic>{};
 
+  static const Duration _initTimeout = Duration(seconds: 2);
+
   static Future<void> initialize(
     String appKey, {
     bool debug = false,
@@ -19,7 +21,9 @@ class Telemetry {
       return;
     }
     try {
-      _initialized = await backend.telemetryInit(appKey, debug: debug);
+      _initialized = await backend
+          .telemetryInit(appKey, debug: debug)
+          .timeout(_initTimeout);
     } catch (_) {
       _initialized = false;
     }

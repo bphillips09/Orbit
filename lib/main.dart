@@ -61,7 +61,8 @@ void main() async {
       },
     );
 
-    await Telemetry.initialize(appID, debug: kDebugMode);
+    // Never block startup on telemetry
+    unawaited(Telemetry.initialize(appID, debug: kDebugMode));
 
     if (kIsWeb || kIsWasm) {
       try {

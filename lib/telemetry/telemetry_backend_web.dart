@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:math';
 
 import 'package:device_info_plus/device_info_plus.dart';
@@ -10,6 +11,8 @@ import 'package:web/web.dart' as web;
 String? _appKey;
 Uri? _apiUrl;
 Future<Map<String, dynamic>>? _systemPropsFuture;
+
+const Duration _telemetryNetworkTimeout = Duration(seconds: 2);
 
 // Session handling
 const Duration _sessionTimeout = Duration(hours: 1);
@@ -50,14 +53,16 @@ Future<void> telemetrySend(
   ];
 
   try {
-    await http.post(
+    await http
+        .post(
       url,
       headers: {
         'App-Key': key,
         'Content-Type': 'application/json; charset=UTF-8',
       },
       body: jsonEncode(payload),
-    );
+    )
+        .timeout(_telemetryNetworkTimeout);
   } catch (_) {
     // Never fail due to telemetry
   }
