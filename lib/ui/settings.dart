@@ -2107,7 +2107,7 @@ class SettingsPage extends StatelessWidget {
                 children: [
                   const Expanded(
                     child: Text(
-                      'Select Audio Input Device',
+                      'Select Audio Input',
                       overflow: TextOverflow.ellipsis,
                       softWrap: false,
                     ),
@@ -2167,30 +2167,44 @@ class SettingsPage extends StatelessWidget {
       },
     );
 
-    if (selectedDevice != null) {
-      // Save the selected device
-      var deviceName = mainPage.audioController.getDeviceName(selectedDevice);
-      appState.storageData.save(SaveDataType.lastAudioDevice, deviceName);
-
-      // Stop current audio and restart with new device
-      await mainPage.audioController.stopAudioThread();
+    if (selectedDevice == null) {
+      appState.updateEnableAudio(false);
+      await appState.storageData.save(SaveDataType.enableAudio, false);
+      await appState.storageData.delete(SaveDataType.lastAudioDevice);
       try {
-        await mainPage.audioController.startAudioThread(
-            selectedDevice: selectedDevice,
-            androidAudioOutputRoute: appState.androidAudioOutputRoute,
-            detectAudioInterruptions: appState.detectAudioInterruptions,
-            preferredSampleRate: appState.audioSampleRate);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Audio device changed to: $deviceName')),
-          );
-        }
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to start audio: $e')),
-          );
-        }
+        await mainPage.audioController.stopAudioThread();
+      } catch (_) {}
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Audio disabled, no input selected')),
+        );
+      }
+      return;
+    }
+
+    // Save the selected device
+    var deviceName = mainPage.audioController.getDeviceName(selectedDevice);
+    await appState.storageData.save(SaveDataType.lastAudioDevice, deviceName);
+
+    // Stop current audio and restart with new device
+    await mainPage.audioController.stopAudioThread();
+    try {
+      await mainPage.audioController.startAudioThread(
+          selectedDevice: selectedDevice,
+          androidAudioOutputRoute: appState.androidAudioOutputRoute,
+          detectAudioInterruptions: appState.detectAudioInterruptions,
+          preferredSampleRate: appState.audioSampleRate);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Audio device changed to: $deviceName')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to start audio: $e')),
+        );
       }
     }
   }
@@ -2224,7 +2238,9 @@ class SettingsPage extends StatelessWidget {
       await appState.storageData.delete(SaveDataType.enableAudio);
       await appState.storageData.delete(SaveDataType.lastAudioDevice);
       await appState.storageData.delete(SaveDataType.audioSampleRate);
+      await appState.storageData.delete(SaveDataType.useNativeAuxInput);
       appState.updateAudioSampleRate(48000);
+      appState.updateUseNativeAuxInput(false);
 
       // Stop current audio
       await mainPage.audioController.stopAudioThread();

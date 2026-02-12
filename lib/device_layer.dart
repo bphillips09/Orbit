@@ -36,6 +36,7 @@ class DeviceLayer {
   final Function(String title, String details)? onConnectionDetailChanged;
   final Function()? onClearMessages;
 
+  int _writeFailureCount = 0;
   int _highestReceivedSequence = 0;
   bool _initialized = false;
   Uint8List _buffer = Uint8List(0);
@@ -461,7 +462,17 @@ class DeviceLayer {
     }
 
     // Write the frame to the device
-    _serialHelper.writeData(send);
+    if (await _serialHelper.writeData(send) != 0) {
+      logger.w('Failed to write data to device');
+      // Increment failure count
+      _writeFailureCount++;
+      if (_writeFailureCount >= 3) {
+        onError?.call('Failed to write data to device', true);
+        _writeFailureCount = 0;
+        await _serialHelper.closePort();
+        return;
+      }
+    }
   }
 
   // Increment the sequence number

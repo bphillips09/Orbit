@@ -159,10 +159,28 @@ class AudioController {
       sampleRate = 48000;
     }
 
-    // Initialize the AudioSession
-    var session = await AudioSession.instance;
-    if (await session.setActive(true,
-        androidWillPauseWhenDucked: _detectAudioInterruptions)) {
+    // Initialize the AudioSession.
+    final session = await AudioSession.instance;
+    try {
+      await session.configure(
+        AudioSessionConfiguration(
+          androidAudioAttributes: const AndroidAudioAttributes(
+            contentType: AndroidAudioContentType.music,
+            usage: AndroidAudioUsage.media,
+          ),
+          androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+          // If enabled, treat ducking as a pause so we fully yield
+          androidWillPauseWhenDucked: _detectAudioInterruptions,
+        ),
+      );
+    } catch (e, st) {
+      logger.w('AudioSession configure failed: $e\n$st');
+    }
+
+    if (await session.setActive(
+      true,
+      androidWillPauseWhenDucked: _detectAudioInterruptions,
+    )) {
       logger.i('Audio session active');
     } else {
       logger.e('Audio session setup failed');
@@ -315,10 +333,7 @@ class AudioController {
         manageBluetooth: false,
         audioSource: AndroidAudioSource.unprocessed,
       ),
-      // Plugin interruption behavior depends on setting (pause only, resume by us)
-      audioInterruption: _detectAudioInterruptions
-          ? AudioInterruptionMode.pause
-          : AudioInterruptionMode.none,
+      audioInterruption: AudioInterruptionMode.none,
       device: device,
     ));
 

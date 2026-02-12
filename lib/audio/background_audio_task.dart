@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:orbit/app_state.dart';
 import 'package:orbit/device_layer.dart';
+import 'package:orbit/platform/head_unit_aux.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/ui/preset.dart' show computeNextPresetSid;
 import 'package:orbit/sxi_commands.dart';
@@ -23,6 +25,7 @@ class AudioServiceHandler extends BaseAudioHandler
   PlaybackInfo? nowPlaying;
   File? albumArt;
   Directory? cacheDir;
+  AppPlaybackState? _lastPlaybackState;
 
   @override
   Future<void> play() async {
@@ -159,6 +162,18 @@ class AudioServiceHandler extends BaseAudioHandler
     logger.d('---> Process State Change');
     bool playing = appPlaybackState == AppPlaybackState.live ||
         appPlaybackState == AppPlaybackState.recordedContent;
+
+    // Switch head unit to aux when system transitions to playing
+    final bool wasPlaying = _lastPlaybackState == AppPlaybackState.live ||
+        _lastPlaybackState == AppPlaybackState.recordedContent;
+    _lastPlaybackState = appPlaybackState;
+    if (!wasPlaying &&
+        playing &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        appState.useNativeAuxInput &&
+        HeadUnitAux.isAvailable) {
+      unawaited(HeadUnitAux.trySwitchToAux());
+    }
 
     // Ensure browser tab shows as playing on web if there's any audio
     NowPlayingIndicator.update(isPlaying: true);
