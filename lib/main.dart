@@ -162,12 +162,13 @@ class MainPage extends StatefulWidget {
   MainPageState createState() => MainPageState();
 }
 
-class MainPageState extends State<MainPage> {
+class MainPageState extends State<MainPage> with WindowListener {
   late SXiLayer sxiLayer;
   late DeviceLayer deviceLayer;
   late SystemConfiguration _loadedConfig;
   late AppState appState;
   final audioController = AudioController();
+  bool _windowCloseInProgress = false;
   var availablePorts = [];
   double transportValue = 0;
   bool transportDragging = false;
@@ -208,6 +209,14 @@ class MainPageState extends State<MainPage> {
     super.initState();
 
     logger.d('Initializing...');
+
+    if (!kIsWeb &&
+        !kIsWasm &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux)) {
+      windowManager.addListener(this);
+      unawaited(windowManager.setPreventClose(true));
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
@@ -751,11 +760,22 @@ class MainPageState extends State<MainPage> {
     );
   }
 
-  void _attemptCloseApp() {
+  Future<void> _attemptCloseApp() async {
     // Try to close the app gracefully on supported platforms.
     // On Web/Wasm, just dismiss the dialog.
     try {
-      if (!kIsWeb && !kIsWasm) {
+      await audioController
+          .stopAudioThread()
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {}
+    try {
+      if (!kIsWeb &&
+          !kIsWasm &&
+          (defaultTargetPlatform == TargetPlatform.windows ||
+              defaultTargetPlatform == TargetPlatform.linux ||
+              defaultTargetPlatform == TargetPlatform.macOS)) {
+        await windowManager.destroy();
+      } else if (!kIsWeb && !kIsWasm) {
         SystemNavigator.pop();
       } else {
         Navigator.of(context, rootNavigator: true).pop();
@@ -766,6 +786,25 @@ class MainPageState extends State<MainPage> {
         Navigator.of(context, rootNavigator: true).pop();
       } catch (_) {}
     }
+  }
+
+  @override
+  void onWindowClose() {
+    if (_windowCloseInProgress) return;
+    _windowCloseInProgress = true;
+    unawaited(() async {
+      try {
+        await audioController
+            .stopAudioThread()
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {}
+      try {
+        await windowManager.setPreventClose(false);
+      } catch (_) {}
+      try {
+        await windowManager.destroy();
+      } catch (_) {}
+    }());
   }
 
   Future<void> setupAudio() async {
@@ -887,6 +926,17 @@ class MainPageState extends State<MainPage> {
 
   @override
   void dispose() {
+    if (!kIsWeb &&
+        !kIsWasm &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux)) {
+      try {
+        windowManager.removeListener(this);
+      } catch (_) {}
+      try {
+        unawaited(windowManager.setPreventClose(false));
+      } catch (_) {}
+    }
     deviceLayer.close();
     audioController.dispose();
     appState.playbackInfoNotifier.removeListener(onPlaybackInfoChanged);
