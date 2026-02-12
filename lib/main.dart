@@ -1457,241 +1457,254 @@ class MainPageState extends State<MainPage> with WindowListener {
                           children: [
                             Expanded(
                               child: Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    // Channel info
-                                    () {
-                                      final bool smallLandscape =
-                                          appState.smallScreenMode;
-                                      final Widget channelCenter =
-                                          GestureDetector(
-                                        onTap: () {
-                                          ChannelInfoDialog.show(
-                                            context,
-                                            appState: appState,
-                                            sid: appState.currentSid,
-                                            deviceLayer: deviceLayer,
-                                            onTuneAlign: (channelNumber) {
-                                              // Tune to the channel
-                                              final cfgCmd =
-                                                  SXiSelectChannelCommand(
-                                                ChanSelectionType
-                                                    .tuneUsingChannelNumber,
-                                                channelNumber,
-                                                0xFF,
-                                                ChannelAttributes.all(),
-                                                AudioRoutingType.routeToAudio,
-                                              );
-                                              deviceLayer
-                                                  .sendControlCommand(cfgCmd);
-                                            },
-                                          );
-                                        },
-                                        child: currentChannelImage != null
-                                            ? ConstrainedBox(
-                                                constraints:
-                                                    const BoxConstraints(
-                                                  maxWidth: 400,
-                                                  maxHeight: 60,
-                                                ),
-                                                child: currentChannelImage!,
-                                              )
-                                            : ConstrainedBox(
-                                                constraints:
-                                                    const BoxConstraints(
-                                                  maxWidth: 400,
-                                                  maxHeight: 60,
-                                                ),
-                                                child: Text(
-                                                  appState
-                                                      .nowPlaying.channelName,
-                                                  textAlign: TextAlign.center,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    fontSize:
-                                                        appState.smallScreenMode
-                                                            ? 20
-                                                            : 32,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                      );
-
-                                      if (!smallLandscape) {
-                                        return channelCenter;
-                                      }
-
-                                      return Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          _buildChannelBrowseButton(left: true),
-                                          const SizedBox(width: 10),
-                                          _buildChannelNumberInput(
-                                              bigControls: true),
-                                          const SizedBox(width: 20),
-                                          channelCenter,
-                                          const SizedBox(width: 10),
-                                          _buildChannelBrowseButton(
-                                              left: false),
-                                        ],
-                                      );
-                                    }(),
-
-                                    SizedBox(
-                                        height:
-                                            appState.smallScreenMode ? 16 : 40),
-                                    // Main content: Album art + info
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.center,
-                                      children: [
-                                        // Album Art
-                                        GestureDetector(
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                      maxWidth: appState.smallScreenMode
+                                          ? constraints.maxWidth
+                                          : 700),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      // Channel info
+                                      () {
+                                        final bool smallLandscape =
+                                            appState.smallScreenMode;
+                                        final Widget channelCenter =
+                                            GestureDetector(
                                           onTap: () {
-                                            FavoriteDialogHelper.show(
-                                              context: context,
+                                            ChannelInfoDialog.show(
+                                              context,
                                               appState: appState,
+                                              sid: appState.currentSid,
                                               deviceLayer: deviceLayer,
+                                              onTuneAlign: (channelNumber) {
+                                                // Tune to the channel
+                                                final cfgCmd =
+                                                    SXiSelectChannelCommand(
+                                                  ChanSelectionType
+                                                      .tuneUsingChannelNumber,
+                                                  channelNumber,
+                                                  0xFF,
+                                                  ChannelAttributes.all(),
+                                                  AudioRoutingType.routeToAudio,
+                                                );
+                                                deviceLayer
+                                                    .sendControlCommand(cfgCmd);
+                                              },
                                             );
                                           },
-                                          child: AlbumArt(
-                                            size: appState.smallScreenMode
-                                                ? 140
-                                                : 180,
-                                            filterQuality: FilterQuality.high,
-                                            imageBytes: appState
-                                                    .nowPlaying.image.isEmpty
-                                                ? null
-                                                : appState.nowPlaying.image,
-                                            borderRadius: 8.0,
-                                            borderWidth: 2.0,
-                                            placeholder: Icon(
-                                              getCategoryIcon(
-                                                appState.currentCategoryString,
-                                              ),
-                                              size: 64,
-                                            ),
-                                          ),
-                                        ),
-                                        SizedBox(width: 36),
-                                        // Song Info
-                                        Flexible(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.center,
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              TextButton(
-                                                onPressed: () {
-                                                  _showSelectChannelFromEPG(
-                                                    initialCategory: appState
-                                                        .currentCategory,
-                                                  );
-                                                },
-                                                child: Text(
+                                          child: currentChannelImage != null
+                                              ? ConstrainedBox(
+                                                  constraints:
+                                                      const BoxConstraints(
+                                                    maxWidth: 400,
+                                                    maxHeight: 60,
+                                                  ),
+                                                  child: currentChannelImage!,
+                                                )
+                                              : ConstrainedBox(
+                                                  constraints:
+                                                      const BoxConstraints(
+                                                    maxWidth: 400,
+                                                    maxHeight: 60,
+                                                  ),
+                                                  child: Text(
+                                                    appState
+                                                        .nowPlaying.channelName,
+                                                    textAlign: TextAlign.center,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: appState
+                                                              .smallScreenMode
+                                                          ? 20
+                                                          : 32,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                ),
+                                        );
+
+                                        if (!smallLandscape) {
+                                          return channelCenter;
+                                        }
+
+                                        return Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            _buildChannelBrowseButton(
+                                                left: true),
+                                            const SizedBox(width: 10),
+                                            _buildChannelNumberInput(
+                                                bigControls: true),
+                                            const SizedBox(width: 20),
+                                            channelCenter,
+                                            const SizedBox(width: 10),
+                                            _buildChannelBrowseButton(
+                                                left: false),
+                                          ],
+                                        );
+                                      }(),
+
+                                      SizedBox(
+                                          height: appState.smallScreenMode
+                                              ? 16
+                                              : 40),
+                                      // Main content: Album art + info
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          // Album Art
+                                          GestureDetector(
+                                            onTap: () {
+                                              FavoriteDialogHelper.show(
+                                                context: context,
+                                                appState: appState,
+                                                deviceLayer: deviceLayer,
+                                              );
+                                            },
+                                            child: AlbumArt(
+                                              size: appState.smallScreenMode
+                                                  ? 140
+                                                  : 180,
+                                              filterQuality: FilterQuality.high,
+                                              imageBytes: appState
+                                                      .nowPlaying.image.isEmpty
+                                                  ? null
+                                                  : appState.nowPlaying.image,
+                                              borderRadius: 8.0,
+                                              borderWidth: 2.0,
+                                              placeholder: Icon(
+                                                getCategoryIcon(
                                                   appState
                                                       .currentCategoryString,
-                                                  style:
-                                                      TextStyle(fontSize: 20),
                                                 ),
+                                                size: 64,
                                               ),
-                                              SizedBox(height: 8),
-                                              GestureDetector(
-                                                onTap: () {
-                                                  FavoriteDialogHelper.show(
-                                                    context: context,
-                                                    appState: appState,
-                                                    deviceLayer: deviceLayer,
-                                                  );
-                                                },
-                                                child: Text(
-                                                  appState.nowPlaying.songTitle,
-                                                  style: TextStyle(
-                                                    fontSize: 28,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                  maxLines:
-                                                      appState.smallScreenMode
-                                                          ? 1
-                                                          : 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  textAlign: TextAlign.center,
-                                                ),
-                                              ),
-                                              SizedBox(height: 8),
-                                              GestureDetector(
-                                                onTap: () {
-                                                  FavoriteDialogHelper.show(
-                                                    context: context,
-                                                    appState: appState,
-                                                    deviceLayer: deviceLayer,
-                                                  );
-                                                },
-                                                child: Text(
-                                                  appState
-                                                      .nowPlaying.artistTitle,
-                                                  style: TextStyle(
-                                                    fontSize: 20,
-                                                    color: Colors.grey,
-                                                  ),
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  textAlign: TextAlign.center,
-                                                ),
-                                              ),
-                                            ],
+                                            ),
                                           ),
-                                        ),
+                                          SizedBox(width: 36),
+                                          // Song Info
+                                          Flexible(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.center,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                TextButton(
+                                                  onPressed: () {
+                                                    _showSelectChannelFromEPG(
+                                                      initialCategory: appState
+                                                          .currentCategory,
+                                                    );
+                                                  },
+                                                  child: Text(
+                                                    appState
+                                                        .currentCategoryString,
+                                                    style:
+                                                        TextStyle(fontSize: 20),
+                                                  ),
+                                                ),
+                                                SizedBox(height: 8),
+                                                GestureDetector(
+                                                  onTap: () {
+                                                    FavoriteDialogHelper.show(
+                                                      context: context,
+                                                      appState: appState,
+                                                      deviceLayer: deviceLayer,
+                                                    );
+                                                  },
+                                                  child: Text(
+                                                    appState
+                                                        .nowPlaying.songTitle,
+                                                    style: TextStyle(
+                                                      fontSize: 28,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                    maxLines:
+                                                        appState.smallScreenMode
+                                                            ? 1
+                                                            : 2,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    textAlign: TextAlign.center,
+                                                  ),
+                                                ),
+                                                SizedBox(height: 8),
+                                                GestureDetector(
+                                                  onTap: () {
+                                                    FavoriteDialogHelper.show(
+                                                      context: context,
+                                                      appState: appState,
+                                                      deviceLayer: deviceLayer,
+                                                    );
+                                                  },
+                                                  child: Text(
+                                                    appState
+                                                        .nowPlaying.artistTitle,
+                                                    style: TextStyle(
+                                                      fontSize: 20,
+                                                      color: Colors.grey,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    textAlign: TextAlign.center,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      SizedBox(
+                                          height: appState.smallScreenMode
+                                              ? 16
+                                              : 40),
+                                      // Channel and Playback in one row
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: appState.smallScreenMode
+                                            ? <Widget>[
+                                                _buildPlaybackControls(),
+                                              ]
+                                            : <Widget>[
+                                                // Channel Controls
+                                                _buildChannelControls(),
+                                                SizedBox(width: 32),
+                                                // Vertical Separator
+                                                Container(
+                                                  width: 1,
+                                                  height: 60,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .outline
+                                                      .withValues(alpha: 0.3),
+                                                ),
+                                                SizedBox(width: 32),
+                                                // Playback Controls
+                                                _buildPlaybackControls(),
+                                              ],
+                                      ),
+                                      if (!appState.smallScreenMode) ...[
+                                        const SizedBox(height: 12),
+                                        // Contextual actions
+                                        _buildActionButtons(isLandscape: true),
                                       ],
-                                    ),
-                                    SizedBox(
-                                        height:
-                                            appState.smallScreenMode ? 16 : 40),
-                                    // Channel and Playback in one row
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: appState.smallScreenMode
-                                          ? <Widget>[
-                                              _buildPlaybackControls(),
-                                            ]
-                                          : <Widget>[
-                                              // Channel Controls
-                                              _buildChannelControls(),
-                                              SizedBox(width: 32),
-                                              // Vertical Separator
-                                              Container(
-                                                width: 1,
-                                                height: 60,
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .outline
-                                                    .withValues(alpha: 0.3),
-                                              ),
-                                              SizedBox(width: 32),
-                                              // Playback Controls
-                                              _buildPlaybackControls(),
-                                            ],
-                                    ),
-                                    if (!appState.smallScreenMode) ...[
-                                      const SizedBox(height: 12),
-                                      // Contextual actions
-                                      _buildActionButtons(isLandscape: true),
+                                      if (!appState.smallScreenMode)
+                                        const SizedBox(height: 12),
+                                      _buildTransportArea(),
                                     ],
-                                    if (!appState.smallScreenMode)
-                                      const SizedBox(height: 12),
-                                    _buildTransportArea(),
-                                  ],
+                                  ),
                                 ),
                               ),
                             ),
