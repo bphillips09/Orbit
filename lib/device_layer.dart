@@ -652,6 +652,14 @@ class DeviceLayer {
       // Tune to default SID
       SXiSelectChannelCommand(ChanSelectionType.tuneUsingSID, defaultSid, 1,
           ChannelAttributes.all(), AudioRoutingType.routeToAudio),
+      // Restart song on tune
+      SXiConfigureChannelSelectionCommand(
+          (systemConfiguration?.tuneStart ?? false)
+              ? PlayPoint.auto
+              : PlayPoint.live,
+          5,
+          3,
+          1),
       // Set EQ band gain
       SXiAudioEqualizerCommand(eq),
       // Set volume
@@ -996,6 +1004,7 @@ class SystemConfiguration {
   List<int> presets;
   List<int> favoriteSongIDs;
   List<int> favoriteArtistIDs;
+  bool tuneStart;
 
   SystemConfiguration(
       {this.volume = 0,
@@ -1003,5 +1012,6 @@ class SystemConfiguration {
       this.eq = const [],
       this.presets = const [],
       this.favoriteSongIDs = const [],
-      this.favoriteArtistIDs = const []});
+      this.favoriteArtistIDs = const [],
+      this.tuneStart = false});
 }

@@ -461,6 +461,7 @@ class MainPageState extends State<MainPage> with WindowListener {
             .where((f) => f.type == FavoriteType.artist)
             .map((f) => f.id)
             .toList(),
+        tuneStart: appState.tuneStart,
       );
 
       String lastPortString = await appState.storageData.load(
