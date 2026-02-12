@@ -166,7 +166,13 @@ class MainPage extends StatefulWidget {
   MainPageState createState() => MainPageState();
 }
 
-class MainPageState extends State<MainPage> with WindowListener {
+class MainPageState extends State<MainPage>
+    with WindowListener, WidgetsBindingObserver {
+  static const String _setupDialogRouteUseNativeAux = 'setup.use_native_aux';
+  static const String _setupDialogRouteUseAudio = 'setup.use_audio';
+  static const String _setupDialogRouteSelectAudioDevice =
+      'setup.select_audio_device';
+
   late SXiLayer sxiLayer;
   late DeviceLayer deviceLayer;
   late SystemConfiguration _loadedConfig;
@@ -186,6 +192,7 @@ class MainPageState extends State<MainPage> with WindowListener {
   bool _startupGateVisible = false;
   String _startupGateMessage = '';
   bool _startupCompleted = false;
+  bool _startupCompletionInProgress = false;
   bool initiatedPlayback = false;
   bool _audioServiceInitialized = false;
   String _connectionDetails = '';
@@ -211,6 +218,7 @@ class MainPageState extends State<MainPage> with WindowListener {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     logger.d('Initializing...');
 
@@ -372,13 +380,21 @@ class MainPageState extends State<MainPage> with WindowListener {
   }
 
   Future<void> onConnected() async {
-    if (!_startupCompleted) {
+    if (_startupCompleted || _startupCompletionInProgress) {
+      _hideStartupGate();
+      return;
+    }
+
+    _startupCompletionInProgress = true;
+    try {
       await clearAllMessages();
       await setupAudio();
       onPlaybackStateChanged();
       _startupCompleted = true;
+    } finally {
+      _startupCompletionInProgress = false;
+      _hideStartupGate();
     }
-    _hideStartupGate();
   }
 
   Future<void> _connectFromStartupGate() async {
@@ -660,6 +676,7 @@ class MainPageState extends State<MainPage> with WindowListener {
     bool snackbar = true,
     bool dismissable = true,
   }) {
+    logger.t('onMessage: $title: $message');
     if (snackbar) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -715,11 +732,20 @@ class MainPageState extends State<MainPage> with WindowListener {
     // Clear the warning tracking set
     _currentlyDisplayedWarnings.clear();
 
-    // Close dialogs (popup routes) without touching page routes
+    // Close popup routes that are not setup dialogs
     try {
       final navigator = Navigator.of(context, rootNavigator: true);
       if (onlyPopups) {
-        navigator.popUntil((route) => route is! PopupRoute);
+        navigator.popUntil((route) {
+          if (route is! PopupRoute) return true;
+
+          // Keep setup dialogs open
+          final String? name = route.settings.name;
+          final bool isSetupDialog = name == _setupDialogRouteUseNativeAux ||
+              name == _setupDialogRouteUseAudio ||
+              name == _setupDialogRouteSelectAudioDevice;
+          return isSetupDialog;
+        });
       } else {
         navigator.popUntil((route) => route.isFirst);
       }
@@ -745,7 +771,9 @@ class MainPageState extends State<MainPage> with WindowListener {
               child: const Text('Retry'),
               onPressed: () async {
                 Navigator.of(context).pop();
-                await clearAllMessages();
+                if (mounted) {
+                  ScaffoldMessenger.of(this.context).clearSnackBars();
+                }
                 startupSequence();
               },
             ),
@@ -813,38 +841,20 @@ class MainPageState extends State<MainPage> with WindowListener {
   }
 
   Future<void> setupAudio() async {
-    logger.i('Audio setup starting...');
-
-    if (!kIsWeb &&
-        !kIsWasm &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        appState.useNativeAuxInput) {
-      try {
-        await audioController.stopAudioThread();
-      } catch (_) {}
-      appState.updateEnableAudio(false);
-
-      // Switch the head unit to aux now
-      try {
-        final opened = await HeadUnitAux.switchToAux(timeoutMs: 1500);
-        if (!opened) {
-          throw StateError('AUX input did not become active');
-        }
-        onMessage('Head Unit Audio', 'Switched to Aux input.');
-      } catch (e, st) {
-        logger.e('Failed to switch to aux input', error: e, stackTrace: st);
-        appState.updateUseNativeAuxInput(false);
-        onMessage(
-          'Head Unit Audio',
-          'Failed to switch to aux input: ${HeadUnitAux.describeError(e)}',
-        );
-      }
+    if (!_deviceConnected) {
+      logger.d('Skipping audio setup, device not connected');
       return;
     }
+
+    logger.i('Audio setup starting...');
 
     // Load saved audio preferences
     bool? savedEnableAudio = await appState.storageData.load(
       SaveDataType.enableAudio,
+      defaultValue: null,
+    );
+    final bool? savedUseNativeAuxInput = await appState.storageData.load(
+      SaveDataType.useNativeAuxInput,
       defaultValue: null,
     );
     String? savedAudioDeviceName = await appState.storageData.load(
@@ -853,6 +863,68 @@ class MainPageState extends State<MainPage> with WindowListener {
     );
 
     bool useAudio;
+
+    // Respect saved selection first (native Aux vs USB audio)
+    final isAndroid =
+        !kIsWeb && !kIsWasm && defaultTargetPlatform == TargetPlatform.android;
+
+    if (isAndroid && savedUseNativeAuxInput == true) {
+      try {
+        await audioController.stopAudioThread();
+      } catch (_) {}
+      appState.updateEnableAudio(false);
+
+      logger.t('Switching to aux...');
+
+      // Switch the head unit to aux now
+      try {
+        final opened = await HeadUnitAux.switchToAux(timeoutMs: 1500);
+        if (!opened) {
+          throw StateError('Aux input did not become active');
+        }
+        onMessage('Head Unit Audio', 'Switched to Aux input.');
+        return;
+      } catch (e, st) {
+        // If native Aux fails, disable it and fall back to USB audio setup
+        logger.e('Failed to switch to aux input', error: e, stackTrace: st);
+        appState.updateUseNativeAuxInput(false);
+        onMessage(
+          'Head Unit Audio',
+          'Failed to switch to aux input: ${HeadUnitAux.describeError(e)}',
+        );
+      }
+    }
+
+    // If neither audio choice is saved yet, ask about native aux first
+    if (isAndroid &&
+        savedEnableAudio == null &&
+        savedUseNativeAuxInput == null &&
+        HeadUnitAux.isAvailable) {
+      final useNativeAux = await _showUseNativeAuxDialog();
+      if (useNativeAux) {
+        appState.updateUseNativeAuxInput(true);
+        try {
+          await audioController.stopAudioThread();
+        } catch (_) {}
+        appState.updateEnableAudio(false);
+
+        try {
+          final opened = await HeadUnitAux.switchToAux(timeoutMs: 1500);
+          if (!opened) throw StateError('Aux input did not become active');
+          onMessage('Head Unit Audio', 'Switched to Aux input.');
+          return;
+        } catch (e, st) {
+          logger.e('Failed to switch to aux input', error: e, stackTrace: st);
+          appState.updateUseNativeAuxInput(false);
+          onMessage(
+            'Head Unit Audio',
+            'Could not switch to aux input.',
+          );
+        }
+      } else {
+        appState.updateUseNativeAuxInput(false);
+      }
+    }
 
     // If no saved preference, ask the user
     if (savedEnableAudio == null) {
@@ -902,11 +974,25 @@ class MainPageState extends State<MainPage> with WindowListener {
       }
       if (selectedDevice == null) {
         selectedDevice = await _showSelectAudioDeviceDialog();
-        if (selectedDevice != null) {
-          var deviceName = audioController.getDeviceName(selectedDevice);
-          appState.storageData.save(SaveDataType.lastAudioDevice, deviceName);
-          logger.d('Saved audio device: $deviceName');
+        if (selectedDevice == null) {
+          logger.i('Audio device selection dismissed without selection.');
+          appState.updateEnableAudio(false);
+          unawaited(appState.storageData.save(SaveDataType.enableAudio, false));
+          unawaited(appState.storageData.delete(SaveDataType.lastAudioDevice));
+          try {
+            await audioController.stopAudioThread();
+          } catch (_) {}
+          onMessage(
+            'Audio Input',
+            'No input device selected. Continuing without app audio.',
+          );
+          return;
         }
+
+        var deviceName = audioController.getDeviceName(selectedDevice);
+        unawaited(appState.storageData
+            .save(SaveDataType.lastAudioDevice, deviceName));
+        logger.d('Saved audio device: $deviceName');
       }
 
       try {
@@ -931,6 +1017,7 @@ class MainPageState extends State<MainPage> with WindowListener {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (!kIsWeb &&
         !kIsWasm &&
         (defaultTargetPlatform == TargetPlatform.windows ||
@@ -950,6 +1037,25 @@ class MainPageState extends State<MainPage> with WindowListener {
     _onAirShowTimer?.cancel();
     channelTextFocusNode.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed) return;
+    // Switch head unit to aux when resuming
+    if (defaultTargetPlatform != TargetPlatform.android ||
+        !HeadUnitAux.isAvailable ||
+        !appState.useNativeAuxInput) {
+      return;
+    }
+
+    final bool isPlaying = appState.playbackState == AppPlaybackState.live ||
+        appState.playbackState == AppPlaybackState.recordedContent;
+
+    if (!isPlaying && !appState.audioPresence) return;
+
+    unawaited(HeadUnitAux.trySwitchToAux());
   }
 
   void onFavoriteOnAir() {
@@ -1070,11 +1176,45 @@ class MainPageState extends State<MainPage> with WindowListener {
     );
   }
 
+  // Show the head unit native aux dialog (Android first-time setup)
+  Future<bool> _showUseNativeAuxDialog() async {
+    return await showDialog<bool>(
+          barrierDismissible: false,
+          context: context,
+          routeSettings:
+              const RouteSettings(name: _setupDialogRouteUseNativeAux),
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Head Unit Audio'),
+              content: const Text(
+                'If you have a supported head unit, Orbit can try to switch the head unit to Aux-in.',
+              ),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('No, use USB audio'),
+                  onPressed: () {
+                    Navigator.pop(context, false);
+                  },
+                ),
+                FilledButton(
+                  child: const Text('Yes, use Aux'),
+                  onPressed: () {
+                    Navigator.pop(context, true);
+                  },
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+  }
+
   // Show the use audio dialog
   Future<bool> _showUseAudioDialog() async {
     return await showDialog<bool>(
           barrierDismissible: false,
           context: context,
+          routeSettings: const RouteSettings(name: _setupDialogRouteUseAudio),
           builder: (BuildContext context) {
             return AlertDialog(
               title: const Text('Audio Playback'),
@@ -1129,6 +1269,8 @@ class MainPageState extends State<MainPage> with WindowListener {
     return await showDialog<dynamic>(
       barrierDismissible: false,
       context: context,
+      routeSettings:
+          const RouteSettings(name: _setupDialogRouteSelectAudioDevice),
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setStateDialog) {
