@@ -325,7 +325,7 @@ class SettingsPage extends StatelessWidget {
                       final res = await HeadUnitAux.trySwitchToAux(
                         timeoutMs: 1500,
                       );
-                      if (res.appId == null) {
+                      if (!res.opened) {
                         appState.updateUseNativeAuxInput(false);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(

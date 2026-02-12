@@ -825,11 +825,11 @@ class MainPageState extends State<MainPage> with WindowListener {
 
       // Switch the head unit to aux now
       try {
-        final appId = await HeadUnitAux.switchToAux(timeoutMs: 1500);
-        onMessage(
-          'Head Unit Audio',
-          'Switched to Aux input (AppId: $appId).',
-        );
+        final opened = await HeadUnitAux.switchToAux(timeoutMs: 1500);
+        if (!opened) {
+          throw StateError('AUX input did not become active');
+        }
+        onMessage('Head Unit Audio', 'Switched to Aux input.');
       } catch (e, st) {
         logger.e('Failed to switch to aux input', error: e, stackTrace: st);
         appState.updateUseNativeAuxInput(false);

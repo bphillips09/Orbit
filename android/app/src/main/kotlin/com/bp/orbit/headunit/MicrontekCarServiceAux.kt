@@ -24,9 +24,6 @@ object MicrontekCarServiceAux : HeadUnitAuxBackend {
   private const val KEY_AV_CHANNEL = "av_channel"
   private const val CHANNEL_LINE = "line"
   private const val CHANNEL_SYS = "sys"
-
-  private const val APP_ID_AUX_COMPAT = 5
-
   override fun isSupported(context: Context): Boolean {
     val pm = context.packageManager
     val hasPkg = try {
@@ -45,7 +42,7 @@ object MicrontekCarServiceAux : HeadUnitAuxBackend {
     return hasPkg
   }
 
-  override fun switchToAuxBlocking(context: Context, timeoutMs: Long): Result<Int> {
+  override fun switchToAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {
     return runCatching {
       val appContext = context.applicationContext
       val enter = "av_channel_enter=$CHANNEL_LINE"
@@ -67,14 +64,13 @@ object MicrontekCarServiceAux : HeadUnitAuxBackend {
         }
       }
 
-      // Read back channel and return compat AppId mapping
+      // Read back channel and report whether aux is active
       val after = readAvChannel(appContext)
       val ch = after.getOrNull()
       if (ch == CHANNEL_LINE) {
-        APP_ID_AUX_COMPAT
+        true
       } else {
-        val state = ch ?: "unknown"
-        throw IllegalStateException("Failed to switch to aux input (av_channel=$state)")
+        false
       }
     }
   }
@@ -94,13 +90,6 @@ object MicrontekCarServiceAux : HeadUnitAuxBackend {
         val rc = setParameters(car, exit).getOrThrow()
         if (rc < 0) error("carservice setParameters failed (rc=$rc, par=$exit)")
       }
-    }
-  }
-
-  override fun getCurrentAppIdBlocking(context: Context, timeoutMs: Long): Result<Int> {
-    return runCatching {
-      val ch = readAvChannel(context.applicationContext).getOrThrow()
-      if (ch == CHANNEL_LINE) APP_ID_AUX_COMPAT else 0
     }
   }
 

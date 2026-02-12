@@ -37,9 +37,9 @@ object FytSyuMsAux : HeadUnitAuxBackend {
   }
 
   /**
-   * Switch to aux input and return current AppId after switching
+   * Switch to aux input and return whether aux is active.
    */
-  override fun switchToAuxBlocking(context: Context, timeoutMs: Long): Result<Int> {
+  override fun switchToAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {
     val appContext = context.applicationContext
 
     // 1) Try ToolkitService path
@@ -61,10 +61,10 @@ object FytSyuMsAux : HeadUnitAuxBackend {
     )
   }
 
-  /**
+   /**
    * Read current AppId without switching
    */
-  override fun getCurrentAppIdBlocking(context: Context, timeoutMs: Long): Result<Int> {
+  private fun readCurrentSourceIdBlocking(context: Context, timeoutMs: Long): Result<Int> {
     val appContext = context.applicationContext
 
     val moduleViaToolkitResult = bindAndGetMainModuleViaToolkit(appContext, timeoutMs)
@@ -85,10 +85,10 @@ object FytSyuMsAux : HeadUnitAuxBackend {
   }
 
   override fun isCurrentInputAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {
-    return getCurrentAppIdBlocking(context, timeoutMs).map { it == APP_ID_AUX }
+    return readCurrentSourceIdBlocking(context, timeoutMs).map { it == APP_ID_AUX }
   }
 
-  private fun switchAndReadBack(mainModule: IBinder): Result<Int> {
+  private fun switchAndReadBack(mainModule: IBinder): Result<Boolean> {
     // Enable aux input feature
     cmdOneWay(mainModule, 47, intArrayOf(1))
 
@@ -100,8 +100,8 @@ object FytSyuMsAux : HeadUnitAuxBackend {
       Thread.sleep(200L)
     } catch (_: Throwable) {}
 
-    // Read back current AppId
-    return getInt0(mainModule, 0)
+    // Read back current AppId and convert to boolean aux-active state
+    return getInt0(mainModule, 0).map { it == APP_ID_AUX }
   }
 
   private fun bindAndGetMainModuleViaToolkit(context: Context, timeoutMs: Long): Result<IBinder> {

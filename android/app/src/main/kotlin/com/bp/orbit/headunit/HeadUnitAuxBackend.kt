@@ -12,11 +12,8 @@ interface HeadUnitAuxBackend {
   /** Whether this backend is supported on the current device */
   fun isSupported(context: Context): Boolean
 
-  /** Switch to aux-in and return current AppId after switching (or error) */
-  fun switchToAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Int>
-
-  /** Read current AppId without switching (or error) */
-  fun getCurrentAppIdBlocking(context: Context, timeoutMs: Long = 1500L): Result<Int>
+  /** Switch to aux-in and return whether aux input is active (or error) */
+  fun switchToAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Boolean>
 
   /** Whether the current input is aux-in (or error) */
   fun isCurrentInputAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Boolean>

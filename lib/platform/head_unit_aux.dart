@@ -10,19 +10,19 @@ class HeadUnitAux {
       !kIsWeb && !kIsWasm && defaultTargetPlatform == TargetPlatform.android;
 
   // Switch the head unit to aux input
-  static Future<int> switchToAux({int timeoutMs = 1500}) async {
+  static Future<bool> switchToAux({int timeoutMs = 1500}) async {
     if (!isAvailable) {
       throw UnsupportedError('Head unit aux input switching is Android-only.');
     }
-    final appId = await _channel.invokeMethod<int>(
+    final opened = await _channel.invokeMethod<bool>(
       'switchToAux',
       {'timeoutMs': timeoutMs},
     );
-    if (appId == null) {
+    if (opened == null) {
       throw PlatformException(
           code: 'NULL_RESULT', message: 'switchToAux returned null');
     }
-    return appId;
+    return opened;
   }
 
   static String describeError(Object error) {
@@ -39,21 +39,30 @@ class HeadUnitAux {
     return error.toString();
   }
 
-  // Wrapper that logs and returns (appId, errorMessage)
-  static Future<({int? appId, String? errorMessage})> trySwitchToAux(
+  // Wrapper that logs and returns (opened, errorMessage)
+  static Future<({bool opened, String? errorMessage})> trySwitchToAux(
       {int timeoutMs = 1500}) async {
     if (!isAvailable) {
-      return (appId: null, errorMessage: 'Not supported on this platform.');
+      return (opened: false, errorMessage: 'Not supported on this platform.');
     }
     try {
-      final id = await switchToAux(timeoutMs: timeoutMs);
-      logger.i('HeadUnitAux: switched to aux input');
-      return (appId: id, errorMessage: null);
+      final opened = await switchToAux(timeoutMs: timeoutMs);
+      if (opened) {
+        logger.i('HeadUnitAux: switched to aux input');
+      } else {
+        logger.w(
+            'HeadUnitAux: aux input did not become active after switch request');
+        return (
+          opened: false,
+          errorMessage: 'Aux input did not become active',
+        );
+      }
+      return (opened: opened, errorMessage: null);
     } catch (e, st) {
       final msg = describeError(e);
       logger.e('HeadUnitAux: failed to switch to aux input',
           error: e, stackTrace: st);
-      return (appId: null, errorMessage: msg);
+      return (opened: false, errorMessage: msg);
     }
   }
 }

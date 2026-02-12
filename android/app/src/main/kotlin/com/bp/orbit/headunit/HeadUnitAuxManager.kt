@@ -9,8 +9,10 @@ object HeadUnitAuxManager {
   private val backends: List<HeadUnitAuxBackend> = listOf(
     // FYT
     FytSyuMsAux,
-    // PX5 / PX6 (Microntek)
+    // PX5 / PX6 / Microntek
     MicrontekCarServiceAux,
+    // JanCar / Autochips / Mediatek
+    JancarAutochipsAux,
   )
 
   fun getSupportedBackend(context: Context): HeadUnitAuxBackend? {
@@ -29,16 +31,10 @@ object HeadUnitAuxManager {
 
   fun backendIdOrNull(context: Context): String? = getSupportedBackend(context)?.id
 
-  fun switchToAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Int> {
+  fun switchToAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Boolean> {
     val b = getSupportedBackend(context)
       ?: return Result.failure(UnsupportedOperationException("No supported head unit aux-in backend"))
     return b.switchToAuxBlocking(context, timeoutMs)
-  }
-
-  fun getCurrentAppIdBlocking(context: Context, timeoutMs: Long = 1500L): Result<Int> {
-    val b = getSupportedBackend(context)
-      ?: return Result.failure(UnsupportedOperationException("No supported head unit aux-in backend"))
-    return b.getCurrentAppIdBlocking(context, timeoutMs)
   }
 
   fun isCurrentInputAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Boolean> {

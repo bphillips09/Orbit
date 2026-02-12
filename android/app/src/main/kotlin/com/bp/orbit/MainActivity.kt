@@ -45,31 +45,13 @@ class MainActivity : AudioServiceActivity() {
               val res = try {
                 HeadUnitAuxManager.switchToAuxBlocking(applicationContext, timeoutMs)
               } catch (t: Throwable) {
-                Result.failure<Int>(t)
+                Result.failure<Boolean>(t)
               }
               mainHandler.post {
                 res.fold(
-                  onSuccess = { appId -> result.success(appId) },
+                  onSuccess = { opened -> result.success(opened) },
                   onFailure = { err ->
                     result.error("SWITCH_TO_AUX_FAILED", err.message ?: "Failed to switch to aux input", null)
-                  }
-                )
-              }
-            }
-          }
-          "getCurrentAppId" -> {
-            val timeoutMs = (call.argument<Number>("timeoutMs")?.toLong() ?: 1500L)
-            executor.execute {
-              val res = try {
-                HeadUnitAuxManager.getCurrentAppIdBlocking(applicationContext, timeoutMs)
-              } catch (t: Throwable) {
-                Result.failure<Int>(t)
-              }
-              mainHandler.post {
-                res.fold(
-                  onSuccess = { appId -> result.success(appId) },
-                  onFailure = { err ->
-                    result.error("GET_CURRENT_APP_ID_FAILED", err.message ?: "Failed to query current AppId", null)
                   }
                 )
               }
