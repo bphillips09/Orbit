@@ -129,7 +129,14 @@ class OrbitApp extends StatelessWidget {
           return MaterialApp(
             // Allow drag scrolling on desktop/web
             scrollBehavior: const MaterialScrollBehavior().copyWith(
-              dragDevices: {PointerDeviceKind.mouse, PointerDeviceKind.touch},
+              dragDevices: {
+                PointerDeviceKind.mouse,
+                PointerDeviceKind.touch,
+                PointerDeviceKind.trackpad,
+                PointerDeviceKind.stylus,
+                PointerDeviceKind.invertedStylus,
+                PointerDeviceKind.unknown,
+              },
             ),
             title: 'Orbit',
             themeMode: appState.themeMode,
