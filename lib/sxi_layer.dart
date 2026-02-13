@@ -256,7 +256,7 @@ class SXiLayer {
         Event Code: ${eventIndication.eventCode} (${code.name})
         ${dataPairs.join("\n        ")}
         <----- EVENT INDICATION END ----->''';
-        logger.d(eventString);
+        logger.t(eventString);
         break;
 
       case SXiCategoryInfoIndication categoryInfo:
