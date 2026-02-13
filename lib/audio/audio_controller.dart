@@ -332,6 +332,10 @@ class AudioController {
       androidConfig: const AndroidRecordConfig(
         manageBluetooth: false,
         audioSource: AndroidAudioSource.unprocessed,
+        service: AndroidService(
+          title: 'Orbit',
+          content: 'Processing audio input...',
+        ),
       ),
       audioInterruption: AudioInterruptionMode.none,
       device: device,

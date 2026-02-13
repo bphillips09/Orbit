@@ -35,8 +35,8 @@
         </service>
 
         <service
-            android:name="com.llfbandit.record.record.recorder.RecordService"
-            android:enabled="true"
+            android:name="com.llfbandit.record.service.AudioRecordingService"
+            android:foregroundServiceType="microphone"
             android:exported="false" />
 
         <receiver android:name="com.ryanheise.audioservice.MediaButtonReceiver" android:exported="true" tools:ignore="Instantiatable">
