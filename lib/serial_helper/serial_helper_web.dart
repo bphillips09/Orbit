@@ -63,7 +63,7 @@ class WebSerialHelper implements SerialHelper {
   Future<int> writeData(Uint8List data) async {
     if (_serialPort == null) {
       logger.w('Port not open');
-      return 0;
+      return -1;
     }
 
     writer ??= _serialPort?.writable?.getWriter();

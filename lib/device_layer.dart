@@ -462,7 +462,7 @@ class DeviceLayer {
     }
 
     // Write the frame to the device
-    if (await _serialHelper.writeData(send) != 0) {
+    if (await _serialHelper.writeData(send) < 0) {
       logger.w('Failed to write data to device');
       // Increment failure count
       _writeFailureCount++;

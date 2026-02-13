@@ -215,7 +215,7 @@ class StandaloneSerialHelper implements SerialHelper {
     if (_usingNetwork) {
       if (_socket == null) {
         logger.d('Network socket not available');
-        return 1;
+        return -1;
       }
       // Send in chunks up to 1024 bytes
       int offset = 0;
@@ -225,21 +225,21 @@ class StandaloneSerialHelper implements SerialHelper {
             (offset + kChunk) > data.length ? data.length : (offset + kChunk);
         final slice = Uint8List.sublistView(data, offset, end);
         final ok = await _uartSendFramed(slice);
-        if (!ok) return 1;
+        if (!ok) return -1;
         offset = end;
       }
       return 0;
     } else if (Platform.isAndroid) {
       if (_androidPort == null) {
         logger.d('Android port not available');
-        return 1;
+        return -1;
       }
       await _androidPort!.write(data);
       return 0;
     } else {
       if (!_serialPort.isOpen) {
         logger.d('Serial port not open');
-        return 1;
+        return -1;
       }
       return _serialPort.write(data);
     }
