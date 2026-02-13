@@ -185,6 +185,7 @@ class PresetCarouselState extends State<PresetCarousel> {
   @override
   Widget build(BuildContext context) {
     final bool isLandscapeMode = isLandscape(context);
+    final appState = Provider.of<AppState>(context);
 
     // Calculate the number of pages needed
     final int totalPages = (widget.presets.length / widget.itemsPerPage).ceil();
@@ -211,12 +212,30 @@ class PresetCarouselState extends State<PresetCarousel> {
 
                   final int itemsPerRow = isLandscapeMode ? 6 : 3;
                   final int rowsPerPage = isLandscapeMode ? 1 : 2;
+                  final bool smallScreenMode = appState.smallScreenMode;
 
-                  // Account for navigation button padding
-                  final double navigationPadding =
+                  final double tileHeightForComparison = max(
+                    0.0,
+                    (availableHeight - (rowsPerPage - 1) * 4) / rowsPerPage,
+                  );
+                  final double navigationPaddingIfVisible =
                       maxPages > 1 && isLandscapeMode
                           ? _navigationButtonWidth * 2
                           : 0.0;
+                  final double itemWidthWithNavigation = max(
+                    0.0,
+                    ((max(0.0, availableWidth - navigationPaddingIfVisible)) -
+                            (itemsPerRow - 1) * 4) /
+                        itemsPerRow,
+                  );
+                  final bool hideSideButtonsForTallTiles = smallScreenMode &&
+                      isLandscapeMode &&
+                      tileHeightForComparison > itemWidthWithNavigation;
+                  final bool showSideNavigation = maxPages > 1 &&
+                      isLandscapeMode &&
+                      !hideSideButtonsForTallTiles;
+                  final double navigationPadding =
+                      showSideNavigation ? _navigationButtonWidth * 2 : 0.0;
                   final double effectiveWidth =
                       max(0.0, availableWidth - navigationPadding);
                   final double effectiveHeight = max(0.0, availableHeight);
@@ -250,7 +269,7 @@ class PresetCarouselState extends State<PresetCarousel> {
                             height: double.infinity,
                             color: Colors.transparent,
                             padding: EdgeInsets.symmetric(
-                                horizontal: maxPages > 1 && isLandscapeMode
+                                horizontal: showSideNavigation
                                     ? _navigationButtonWidth
                                     : 0.0),
                             alignment: Alignment.center,
@@ -384,7 +403,7 @@ class PresetCarouselState extends State<PresetCarousel> {
                         ),
                       ),
                       // Navigation buttons
-                      if (maxPages > 1 && isLandscapeMode) ...[
+                      if (showSideNavigation) ...[
                         // Left button
                         Positioned(
                           left: 0,
