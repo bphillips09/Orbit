@@ -121,7 +121,7 @@ class DeviceLayer {
         } catch (_) {}
       });
 
-      final gotResponse = await _waitForMessage(anyDeviceMessage: true);
+      final gotResponse = await _waitForMessage(anyDeviceMessage: false);
       _networkInitRetryTimer?.cancel();
       _networkInitRetryTimer = null;
 
