@@ -24,6 +24,8 @@ class StandaloneSerialHelper implements SerialHelper {
   String _networkHost = '';
   int _networkUartPort = 0;
   int? _networkGpioPort;
+  int _networkBaud = 57600;
+  DateTime? _lastNetworkReconnectAttempt;
   Socket? _gpioSocket;
   StreamSubscription<List<int>>? _gpioSubscription;
   final List<int> _gpioRxBuffer = <int>[];
@@ -75,6 +77,7 @@ class StandaloneSerialHelper implements SerialHelper {
         _networkUartPort = int.tryParse(parts[1].trim()) ?? 0;
         _networkGpioPort =
             parts.length >= 3 ? int.tryParse(parts[2].trim()) : null;
+        _networkBaud = baud;
         if (_networkUartPort <= 0 || _networkUartPort > 65535) {
           logger.w('Invalid network port in "$portString"');
           return false;
@@ -125,6 +128,8 @@ class StandaloneSerialHelper implements SerialHelper {
         return false;
       }
     }
+
+    _usingNetwork = false;
 
     if (Platform.isAndroid) {
       logger.d('Opening port (${port ?? "none"}) on Mobile');
@@ -214,8 +219,12 @@ class StandaloneSerialHelper implements SerialHelper {
   Future<int> writeData(Uint8List data) async {
     if (_usingNetwork) {
       if (_socket == null) {
-        logger.d('Network socket not available');
-        return -1;
+        // Socket may have been dropped
+        final ok = await _maybeReconnectNetwork();
+        if (!ok || _socket == null) {
+          logger.d('Network socket not available');
+          return -1;
+        }
       }
       // Send in chunks up to 1024 bytes
       int offset = 0;
@@ -237,6 +246,10 @@ class StandaloneSerialHelper implements SerialHelper {
       await _androidPort!.write(data);
       return 0;
     } else {
+      if (!_desktopOpen) {
+        logger.d('Serial port not open');
+        return -1;
+      }
       if (!_serialPort.isOpen) {
         logger.d('Serial port not open');
         return -1;
@@ -252,8 +265,11 @@ class StandaloneSerialHelper implements SerialHelper {
   ) async {
     if (_usingNetwork) {
       if (_socket == null) {
-        logger.d('Network socket not available');
-        return;
+        await _maybeReconnectNetwork();
+        if (_socket == null) {
+          logger.d('Network socket not available');
+          return;
+        }
       }
       // Register client callbacks
       _clientOnData = (bytes) {
@@ -274,6 +290,9 @@ class StandaloneSerialHelper implements SerialHelper {
         onEnd('Port Error: $e', false);
       }
     } else {
+      if (!_desktopOpen) {
+        return;
+      }
       if (!_serialPort.isOpen) {
         return;
       }
@@ -299,6 +318,7 @@ class StandaloneSerialHelper implements SerialHelper {
   }
 
   Future<bool> configureNetworkUartBaud(int baud) async {
+    _networkBaud = baud;
     try {
       return await _uartSendConfig(baud);
     } catch (_) {
@@ -429,17 +449,82 @@ class StandaloneSerialHelper implements SerialHelper {
       _completeUartReadIfReady();
     }, onError: (e) {
       logger.w('UART READ error: $e');
+      _markUartSocketClosed();
       _finishUartRead(null);
       try {
         _clientOnEnd?.call(e, expectedClosure);
       } catch (_) {}
     }, onDone: () {
       logger.w('UARTIP READ done (socket closed by peer)');
+      _markUartSocketClosed();
       _finishUartRead(null);
       try {
         _clientOnEnd?.call('Socket closed', true);
       } catch (_) {}
     }, cancelOnError: true);
+  }
+
+  void _markUartSocketClosed() {
+    try {
+      _socketSubscription?.cancel().catchError((_) {});
+    } catch (_) {}
+    _socketSubscription = null;
+    try {
+      _socket?.destroy();
+    } catch (_) {}
+    _socket = null;
+    _uartRxBuffer.clear();
+    _finishUartRead(null);
+  }
+
+  Future<bool> _maybeReconnectNetwork() async {
+    final last = _lastNetworkReconnectAttempt;
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(seconds: 2)) {
+      return false;
+    }
+    _lastNetworkReconnectAttempt = DateTime.now();
+
+    if (!_usingNetwork) return false;
+    if (_networkHost.isEmpty || _networkUartPort <= 0) return false;
+
+    try {
+      logger.i('Reconnecting to UART-over-IP $_networkHost:$_networkUartPort');
+      _markUartSocketClosed();
+      expectedClosure = false;
+
+      _socket = await Socket.connect(
+        _networkHost,
+        _networkUartPort,
+        timeout: const Duration(seconds: 5),
+      );
+      logger.i('Reconnected to $_networkHost:$_networkUartPort');
+      _attachUartSubscription();
+
+      final ok = await _uartSendConfig(_networkBaud);
+      logger.i('UARTIP CONFIG after reconnect: $ok');
+      if (!ok) {
+        throw 'UARTIP CONFIG failed after reconnect';
+      }
+
+      try {
+        if (_networkGpioPort != null &&
+            _networkGpioPort! > 0 &&
+            _networkGpioPort! <= 65535) {
+          await _connectGpio();
+          await _initializeGpioSequence();
+        }
+      } catch (e) {
+        logger.w('GPIO-over-IP reconnect failed (non-fatal): $e');
+      }
+
+      _startRecvPolling();
+      return true;
+    } catch (e) {
+      logger.w('UART-over-IP reconnect failed: $e');
+      _markUartSocketClosed();
+      return false;
+    }
   }
 
   Future<Uint8List?> _uartReadExact(int length, Duration timeout) async {
@@ -728,7 +813,6 @@ class StandaloneSerialHelper implements SerialHelper {
       } finally {
         _socketSubscription = null;
         _socket = null;
-        _usingNetwork = false;
         _gpioSocket = null;
       }
       return true;
