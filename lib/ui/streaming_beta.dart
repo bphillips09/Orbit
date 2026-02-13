@@ -2245,6 +2245,12 @@ class _StreamingBetaPageState extends State<StreamingBetaPage> {
           json['ModuleListResponse']?['moduleList']?['modules'] as List?;
       if (modules == null || modules.isEmpty) {
         setState(() => _status = 'challenge: no modules');
+        final message = json['ModuleListResponse']?['messages']?[0];
+        final messageData = message?['message'] as String?;
+        final messageCode = message?['code'] as int?;
+        if (message != null) {
+          setState(() => _status = 'Error: $messageData (code: $messageCode)');
+        }
         return;
       }
       final mod = modules.first;
