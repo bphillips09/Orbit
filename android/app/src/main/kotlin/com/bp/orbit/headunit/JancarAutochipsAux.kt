@@ -85,6 +85,31 @@ object JancarAutochipsAux : HeadUnitAuxBackend {
     return Result.success(false)
   }
 
+  override fun exitAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {
+    val appContext = context.applicationContext
+    val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(300L)
+
+    runCatching {
+      startAutochipsAvInService(appContext, ACTION_QUIT_AV_IN)
+    }
+
+    while (System.currentTimeMillis() < deadline) {
+      val isOpen = isAuxOpenViaBinder(appContext, perCallTimeoutMs = 250L).getOrNull()
+      if (isOpen == false) return Result.success(true)
+      try { Thread.sleep(60L) } catch (_: Throwable) {}
+    }
+
+    // Binder fallback: close directly
+    runCatching {
+      bindIviAvIn(appContext, timeoutMs = 700L).mapCatching { avin ->
+        iAvInClose(avin, AV_ID_AUX).getOrThrow()
+      }.getOrThrow()
+    }
+
+    val isOpenAfter = isAuxOpenViaBinder(appContext, perCallTimeoutMs = 400L).getOrNull()
+    return Result.success(isOpenAfter == false)
+  }
+
   override fun isCurrentInputAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {
     val appContext = context.applicationContext
     return isAuxOpenViaBinder(appContext, perCallTimeoutMs = timeoutMs)

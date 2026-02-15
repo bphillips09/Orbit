@@ -25,6 +25,22 @@ class HeadUnitAux {
     return opened;
   }
 
+  // Exit aux input (backend-dependent; FYT sets AppId back to 0)
+  static Future<bool> exitAux({int timeoutMs = 1500}) async {
+    if (!isAvailable) {
+      throw UnsupportedError('Head unit aux input switching is Android-only.');
+    }
+    final exited = await _channel.invokeMethod<bool>(
+      'exitAux',
+      {'timeoutMs': timeoutMs},
+    );
+    if (exited == null) {
+      throw PlatformException(
+          code: 'NULL_RESULT', message: 'exitAux returned null');
+    }
+    return exited;
+  }
+
   static String describeError(Object error) {
     if (error is PlatformException) {
       final msg = (error.message ?? '').trim();
@@ -63,6 +79,32 @@ class HeadUnitAux {
       logger.e('HeadUnitAux: failed to switch to aux input',
           error: e, stackTrace: st);
       return (opened: false, errorMessage: msg);
+    }
+  }
+
+  // Wrapper that logs and returns (exited, errorMessage)
+  static Future<({bool exited, String? errorMessage})> tryExitAux(
+      {int timeoutMs = 1500}) async {
+    if (!isAvailable) {
+      return (exited: false, errorMessage: 'Not supported on this platform.');
+    }
+    try {
+      final exited = await exitAux(timeoutMs: timeoutMs);
+      if (exited) {
+        logger.i('HeadUnitAux: exited aux input');
+      } else {
+        logger.w('HeadUnitAux: aux input may still be active after exit request');
+        return (
+          exited: false,
+          errorMessage: 'Aux input did not exit',
+        );
+      }
+      return (exited: exited, errorMessage: null);
+    } catch (e, st) {
+      final msg = describeError(e);
+      logger.e('HeadUnitAux: failed to exit aux input',
+          error: e, stackTrace: st);
+      return (exited: false, errorMessage: msg);
     }
   }
 }

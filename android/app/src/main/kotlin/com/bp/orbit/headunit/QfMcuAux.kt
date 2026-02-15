@@ -67,11 +67,24 @@ object QfMcuAux : HeadUnitAuxBackend {
     }
   }
 
-  fun exitAuxBlocking(context: Context): Result<Unit> {
+  override fun exitAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {
     val appContext = context.applicationContext
     val mcu = getMcuManagerInterface(appContext)
       ?: return Result.failure(IllegalStateException("QF mcu_service not available"))
-    return invokeRpcSetChannel(mcu, CHANNEL_MEDIA)
+
+    return runCatching {
+      invokeRpcSetChannel(mcu, CHANNEL_MEDIA).getOrThrow()
+
+      val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(200L)
+      while (System.currentTimeMillis() < deadline) {
+        val ch = invokeRpcGetChannel(mcu).getOrNull()
+        if (ch != CHANNEL_AUX_1 && ch != CHANNEL_AUX_3) return@runCatching true
+        try { Thread.sleep(50L) } catch (_: Throwable) {}
+      }
+
+      val last = invokeRpcGetChannel(mcu).getOrNull()
+      last != CHANNEL_AUX_1 && last != CHANNEL_AUX_3
+    }
   }
 
   private fun hasPackage(pm: PackageManager, pkg: String): Boolean {

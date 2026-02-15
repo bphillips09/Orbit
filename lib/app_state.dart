@@ -46,6 +46,7 @@ class AppState extends ChangeNotifier {
   bool detectAudioInterruptions = true;
   // Android-only: if true, use head unit native aux input instead of app playback
   bool useNativeAuxInput = false;
+  bool quitAuxWhenSuspended = true;
   bool isScanActive = false;
   bool isTuneMixActive = false;
   ThemeMode themeMode = ThemeMode.dark;
@@ -411,6 +412,12 @@ class AppState extends ChangeNotifier {
       defaultValue: false,
     );
 
+    // Load "quit aux-in when suspended" preference
+    quitAuxWhenSuspended = await storageData.load(
+      SaveDataType.quitAuxWhenSuspended,
+      defaultValue: true,
+    );
+
     // Load audio sample rate preference (default 48000)
     audioSampleRate = await storageData.load(
       SaveDataType.audioSampleRate,
@@ -649,6 +656,12 @@ class AppState extends ChangeNotifier {
   void updateUseNativeAuxInput(bool value) {
     useNativeAuxInput = value;
     storageData.save(SaveDataType.useNativeAuxInput, value);
+    notifyListeners();
+  }
+
+  void updateQuitAuxWhenSuspended(bool value) {
+    quitAuxWhenSuspended = value;
+    storageData.save(SaveDataType.quitAuxWhenSuspended, value);
     notifyListeners();
   }
 

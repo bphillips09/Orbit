@@ -15,6 +15,11 @@ interface HeadUnitAuxBackend {
   /** Switch to aux-in and return whether aux input is active (or error) */
   fun switchToAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Boolean>
 
+  /** Exit aux-in and return whether aux is no longer active */
+  fun exitAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Boolean> {
+    return Result.failure(UnsupportedOperationException("Exit Aux not supported by backend " + id))
+  }
+
   /** Whether the current input is aux-in (or error) */
   fun isCurrentInputAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Boolean>
 }

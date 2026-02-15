@@ -346,6 +346,21 @@ class SettingsPage extends StatelessWidget {
                       }
                     },
                   ),
+                if (!kIsWeb &&
+                    !kIsWasm &&
+                    Platform.isAndroid &&
+                    appState.useNativeAuxInput)
+                  _buildSwitchTile(
+                    context,
+                    'Quit aux-in when suspended',
+                    'Exits head unit aux input when the app is backgrounded',
+                    Icons.exit_to_app,
+                    value: appState.quitAuxWhenSuspended,
+                    onChanged: (value) async {
+                      appState.updateQuitAuxWhenSuspended(value);
+                      if (!value) return;
+                    },
+                  ),
                 _buildSwitchTile(
                   context,
                   'Use App for Audio Playback',

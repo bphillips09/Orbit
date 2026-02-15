@@ -48,5 +48,11 @@ object HeadUnitAuxManager {
       ?: return Result.failure(UnsupportedOperationException("No supported head unit aux-in backend"))
     return b.isCurrentInputAuxBlocking(context, timeoutMs)
   }
+
+  fun exitAuxBlocking(context: Context, timeoutMs: Long = 1500L): Result<Boolean> {
+    val b = getSupportedBackend(context)
+      ?: return Result.failure(UnsupportedOperationException("No supported head unit aux-in backend"))
+    return b.exitAuxBlocking(context, timeoutMs)
+  }
 }
 

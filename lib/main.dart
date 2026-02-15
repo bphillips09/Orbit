@@ -1040,6 +1040,12 @@ class MainPageState extends State<MainPage>
         unawaited(windowManager.setPreventClose(false));
       } catch (_) {}
     }
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        HeadUnitAux.isAvailable &&
+        appState.useNativeAuxInput &&
+        appState.quitAuxWhenSuspended) {
+      unawaited(HeadUnitAux.tryExitAux(timeoutMs: 750));
+    }
     deviceLayer.close();
     audioController.dispose();
     appState.playbackInfoNotifier.removeListener(onPlaybackInfoChanged);
@@ -1053,20 +1059,27 @@ class MainPageState extends State<MainPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    if (state != AppLifecycleState.resumed) return;
-    // Switch head unit to aux when resuming
     if (defaultTargetPlatform != TargetPlatform.android ||
         !HeadUnitAux.isAvailable ||
         !appState.useNativeAuxInput) {
       return;
     }
 
-    final bool isPlaying = appState.playbackState == AppPlaybackState.live ||
-        appState.playbackState == AppPlaybackState.recordedContent;
+    if (state == AppLifecycleState.resumed) {
+      // Switch head unit to aux when resuming
+      final bool isPlaying = appState.playbackState == AppPlaybackState.live ||
+          appState.playbackState == AppPlaybackState.recordedContent;
+      if (!isPlaying && !appState.audioPresence) return;
+      unawaited(HeadUnitAux.trySwitchToAux());
+      return;
+    }
 
-    if (!isPlaying && !appState.audioPresence) return;
-
-    unawaited(HeadUnitAux.trySwitchToAux());
+    if (!appState.quitAuxWhenSuspended) return;
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(HeadUnitAux.tryExitAux(timeoutMs: 750));
+    }
   }
 
   void onFavoriteOnAir() {

@@ -61,6 +61,28 @@ object FytSyuMsAux : HeadUnitAuxBackend {
     )
   }
 
+  override fun exitAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {
+    val appContext = context.applicationContext
+
+    // 1) Try ToolkitService path
+    val moduleViaToolkitResult = bindAndGetMainModuleViaToolkit(appContext, timeoutMs)
+    if (moduleViaToolkitResult.isSuccess) {
+      return stopAndReadBack(moduleViaToolkitResult.getOrThrow())
+    }
+
+    // 2) Fallback, bind ModuleService by action "com.syu.ms.main"
+    val moduleViaActionResult = bindByActionGetModule(appContext, ACTION_MS_MAIN, timeoutMs)
+    if (moduleViaActionResult.isSuccess) {
+      return stopAndReadBack(moduleViaActionResult.getOrThrow())
+    }
+
+    return Result.failure(
+      moduleViaActionResult.exceptionOrNull()
+        ?: moduleViaToolkitResult.exceptionOrNull()
+        ?: Exception("Failed to connect to module service")
+    )
+  }
+
    /**
    * Read current AppId without switching
    */
@@ -102,6 +124,22 @@ object FytSyuMsAux : HeadUnitAuxBackend {
 
     // Read back current AppId and convert to boolean aux-active state
     return getInt0(mainModule, 0).map { it == APP_ID_AUX }
+  }
+
+  private fun stopAndReadBack(mainModule: IBinder): Result<Boolean> {
+    // Only change source if we're currently on Aux
+    val current = getInt0(mainModule, 0).getOrNull()
+    if (current != APP_ID_AUX) return Result.success(true)
+
+    // Switch source away from Aux
+    cmdOneWay(mainModule, 0, intArrayOf(0))
+
+    // Give MCU a moment
+    try {
+      Thread.sleep(150L)
+    } catch (_: Throwable) {}
+
+    return getInt0(mainModule, 0).map { it != APP_ID_AUX }
   }
 
   private fun bindAndGetMainModuleViaToolkit(context: Context, timeoutMs: Long): Result<IBinder> {

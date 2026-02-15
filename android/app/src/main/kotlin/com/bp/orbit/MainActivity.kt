@@ -57,6 +57,24 @@ class MainActivity : AudioServiceActivity() {
               }
             }
           }
+          "exitAux" -> {
+            val timeoutMs = (call.argument<Number>("timeoutMs")?.toLong() ?: 1500L)
+            executor.execute {
+              val res = try {
+                HeadUnitAuxManager.exitAuxBlocking(applicationContext, timeoutMs)
+              } catch (t: Throwable) {
+                Result.failure<Boolean>(t)
+              }
+              mainHandler.post {
+                res.fold(
+                  onSuccess = { stopped -> result.success(stopped) },
+                  onFailure = { err ->
+                    result.error("EXIT_AUX_FAILED", err.message ?: "Failed to exit aux input", null)
+                  }
+                )
+              }
+            }
+          }
           "isCurrentInputAux" -> {
             val timeoutMs = (call.argument<Number>("timeoutMs")?.toLong() ?: 1500L)
             executor.execute {

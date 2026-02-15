@@ -25,6 +25,8 @@ object JunsunMainAux : HeadUnitAuxBackend {
 
   // Workmode 8 == AUX2
   private const val WORKMODE_AUX = 8
+  // Workmode 0 == "None/Home"
+  private const val WORKMODE_EXIT = 0
 
   override fun isSupported(context: Context): Boolean {
     val appContext = context.applicationContext
@@ -60,6 +62,32 @@ object JunsunMainAux : HeadUnitAuxBackend {
     }
 
     return getWorkMode(svc).map { it == WORKMODE_AUX }
+  }
+
+  override fun exitAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {
+    val appContext = context.applicationContext
+    val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(300L)
+
+    val binderResult = bindMainUi(appContext, timeoutMs = timeoutMs.coerceAtMost(1200L))
+    if (binderResult.isFailure) return Result.failure(binderResult.exceptionOrNull()!!)
+    val svc = binderResult.getOrThrow()
+
+    val current = getWorkMode(svc).getOrNull()
+    if (current != WORKMODE_AUX) return Result.success(true)
+
+    val exitRes = enterMode(svc, WORKMODE_EXIT)
+    if (exitRes.isFailure) return Result.failure(exitRes.exceptionOrNull()!!)
+
+    while (System.currentTimeMillis() < deadline) {
+      val mode = getWorkMode(svc).getOrNull()
+      if (mode != null && mode != WORKMODE_AUX) return Result.success(true)
+      try {
+        Thread.sleep(60L)
+      } catch (_: Throwable) {
+      }
+    }
+
+    return getWorkMode(svc).map { it != WORKMODE_AUX }
   }
 
   override fun isCurrentInputAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {

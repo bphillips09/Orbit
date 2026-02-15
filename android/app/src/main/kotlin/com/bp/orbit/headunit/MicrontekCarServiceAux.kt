@@ -75,21 +75,34 @@ object MicrontekCarServiceAux : HeadUnitAuxBackend {
     }
   }
 
-  /**
-   * Future helper to exit aux-in
-   */
-  fun exitAuxBlocking(context: Context): Result<Unit> {
+  override fun exitAuxBlocking(context: Context, timeoutMs: Long): Result<Boolean> {
     return runCatching {
       val appContext = context.applicationContext
       val exit = "av_channel_exit=$CHANNEL_LINE"
 
+      // If we're not on line-in, nothing to do
+      val before = readAvChannel(appContext).getOrNull()
+      if (before != CHANNEL_LINE) return@runCatching true
+
+      // Prefer broadcast path
       sendCarManagerEvent(appContext, exit)
 
-      if (readAvChannel(appContext).getOrNull() == CHANNEL_LINE) {
-        val car = getCarServiceBinder() ?: error("carservice binder not available")
+      val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(250L)
+      while (System.currentTimeMillis() < deadline) {
+        val ch = readAvChannel(appContext).getOrNull()
+        if (ch != null && ch != CHANNEL_LINE) return@runCatching true
+        try { Thread.sleep(60L) } catch (_: Throwable) {}
+      }
+
+      // Binder fallback
+      val car = getCarServiceBinder()
+      if (car != null) {
         val rc = setParameters(car, exit).getOrThrow()
         if (rc < 0) error("carservice setParameters failed (rc=$rc, par=$exit)")
       }
+
+      try { Thread.sleep(150L) } catch (_: Throwable) {}
+      readAvChannel(appContext).getOrNull() != CHANNEL_LINE
     }
   }
 
