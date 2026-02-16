@@ -11,6 +11,8 @@ object HeadUnitAuxManager {
     FytSyuMsAux,
     // PX5 / PX6 / Microntek
     MicrontekCarServiceAux,
+    // Topway
+    TopwayTwUtilAux,
     // JanCar / Autochips / Mediatek
     JancarAutochipsAux,
     // QF / MCU channel switch
