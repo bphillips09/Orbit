@@ -194,6 +194,16 @@ class SettingsPage extends StatelessWidget {
                     appState.updateSmallScreenMode(value);
                   },
                 ),
+                _buildSwitchTile(
+                  context,
+                  'Ignore Safe Area',
+                  'Draw UI outside the safe area',
+                  Icons.fullscreen,
+                  value: appState.ignoreSafeArea,
+                  onChanged: (value) {
+                    appState.updateIgnoreSafeArea(value);
+                  },
+                ),
               ],
             ),
             const SizedBox(height: sectionSpacing),
@@ -202,6 +212,17 @@ class SettingsPage extends StatelessWidget {
               'Connection',
               Icons.cable,
               [
+                if (!kIsWeb && !kIsWasm)
+                  _buildSwitchTile(
+                    context,
+                    'Auto-connect on focus gain',
+                    'When Orbit is resumed, retry the device connection',
+                    Icons.refresh,
+                    value: appState.autoConnectOnFocusGain,
+                    onChanged: (value) {
+                      appState.updateAutoConnectOnFocusGain(value);
+                    },
+                  ),
                 _buildSettingTile(
                   context,
                   'Port Selection',
@@ -352,13 +373,27 @@ class SettingsPage extends StatelessWidget {
                     appState.useNativeAuxInput)
                   _buildSwitchTile(
                     context,
-                    'Quit aux-in when suspended',
-                    'Exits head unit aux input when the app is backgrounded',
+                    'Quit aux-in when quitting',
+                    'Exits head unit aux input when the app is closed',
                     Icons.exit_to_app,
                     value: appState.quitAuxWhenSuspended,
                     onChanged: (value) async {
                       appState.updateQuitAuxWhenSuspended(value);
                       if (!value) return;
+                    },
+                  ),
+                if (!kIsWeb &&
+                    !kIsWasm &&
+                    Platform.isAndroid &&
+                    appState.useNativeAuxInput)
+                  _buildSwitchTile(
+                    context,
+                    'Switch to aux on focus gain',
+                    'When Orbit is resumed, switch the head unit to aux input',
+                    Icons.input,
+                    value: appState.switchToAuxOnFocusGain,
+                    onChanged: (value) async {
+                      appState.updateSwitchToAuxOnFocusGain(value);
                     },
                   ),
                 _buildSwitchTile(

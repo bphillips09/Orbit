@@ -4,10 +4,10 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:orbit/data/handlers/channel_graphics_handler.dart';
-import 'package:sembast/sembast_io.dart';
-import 'package:sembast_web/sembast_web_interop.dart';
+import 'package:sembast/sembast.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:orbit/storage/sembast_factory.dart';
 import 'package:orbit/ui/preset.dart';
 import 'package:orbit/logging.dart';
 import 'package:orbit/data/favorite.dart';
@@ -15,6 +15,7 @@ import 'package:orbit/data/favorite.dart';
 class StorageData {
   late Database _mainDb;
   late Database _imageDb;
+  bool _initialized = false;
 
   final _saveDataStore = stringMapStoreFactory.store('save_data');
   final _graphicsReferenceStore =
@@ -26,23 +27,131 @@ class StorageData {
 
   Future<void> init() async {
     if (kIsWeb || kIsWasm) {
-      _mainDb = await databaseFactoryWeb.openDatabase('orbit.db');
+      _mainDb = await databaseFactoryPlatform.openDatabase('orbit.db');
     } else {
       final appDir = await getApplicationSupportDirectory();
       final mainDbPath = join(appDir.path, 'orbit.db');
-      _mainDb = await databaseFactoryIo.openDatabase(mainDbPath);
+      _mainDb = await databaseFactoryPlatform.openDatabase(mainDbPath);
     }
 
     if (kIsWeb || kIsWasm) {
-      _imageDb = await databaseFactoryWeb.openDatabase('orbit_data.db');
+      _imageDb = await databaseFactoryPlatform.openDatabase('orbit_data.db');
     } else {
       final appDir = await getApplicationSupportDirectory();
       final imageDbPath = join(appDir.path, 'orbit_data.db');
-      _imageDb = await databaseFactoryIo.openDatabase(imageDbPath);
+      _imageDb = await databaseFactoryPlatform.openDatabase(imageDbPath);
     }
 
     serviceGraphicsReferenceMap = await getGraphicsListFromStorage();
     imageMap = await getImageListFromStorage();
+    _initialized = true;
+  }
+
+  Future<void> close() async {
+    if (!_initialized) return;
+    try {
+      await _mainDb.close();
+    } catch (_) {}
+    try {
+      await _imageDb.close();
+    } catch (_) {}
+    _initialized = false;
+  }
+
+  Future<Map<String, dynamic>> exportMainDbSnapshot({
+    required int formatVersion,
+  }) async {
+    return _exportDbSnapshot(
+      _mainDb,
+      formatVersion: formatVersion,
+      storeNames: const ['save_data'],
+    );
+  }
+
+  Future<Map<String, dynamic>> exportImageDbSnapshot({
+    required int formatVersion,
+  }) async {
+    return _exportDbSnapshot(
+      _imageDb,
+      formatVersion: formatVersion,
+      storeNames: const ['graphics_reference', 'graphics_info'],
+    );
+  }
+
+  Future<void> importMainDbSnapshot(Map<String, dynamic> snapshot) async {
+    await _importDbSnapshot(
+      _mainDb,
+      snapshot,
+      storeNames: const ['save_data'],
+    );
+  }
+
+  Future<void> importImageDbSnapshot(Map<String, dynamic> snapshot) async {
+    await _importDbSnapshot(
+      _imageDb,
+      snapshot,
+      storeNames: const ['graphics_reference', 'graphics_info'],
+    );
+
+    serviceGraphicsReferenceMap = await getGraphicsListFromStorage();
+    imageMap = await getImageListFromStorage();
+  }
+
+  Future<Map<String, dynamic>> _exportDbSnapshot(
+    Database db, {
+    required int formatVersion,
+    required List<String> storeNames,
+  }) async {
+    final storesOut = <String, dynamic>{};
+
+    for (final storeName in storeNames) {
+      final store = StoreRef<dynamic, dynamic>(storeName);
+      final records = await store.find(db);
+      storesOut[storeName] = records
+          .map((r) => <String, dynamic>{
+                'key': r.key,
+                'value': r.value,
+              })
+          .toList();
+    }
+
+    return <String, dynamic>{
+      'formatVersion': formatVersion,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'stores': storesOut,
+    };
+  }
+
+  Future<void> _importDbSnapshot(
+    Database db,
+    Map<String, dynamic> snapshot, {
+    required List<String> storeNames,
+  }) async {
+    final storesRaw = snapshot['stores'];
+    if (storesRaw is! Map) {
+      throw StateError('Snapshot is missing "stores" map');
+    }
+    final stores = Map<String, dynamic>.from(storesRaw);
+
+    await db.transaction((txn) async {
+      for (final storeName in storeNames) {
+        final store = StoreRef<dynamic, dynamic>(storeName);
+        await store.delete(txn);
+
+        final recordsRaw = stores[storeName];
+        if (recordsRaw is! List) {
+          continue;
+        }
+
+        for (final record in recordsRaw) {
+          if (record is! Map) continue;
+          final map = Map<String, dynamic>.from(record);
+          final key = map['key'];
+          final value = map['value'];
+          await store.record(key).put(txn, value);
+        }
+      }
+    });
   }
 
   Future<void> save(SaveDataType saveDataType, dynamic value) async {
@@ -98,7 +207,10 @@ class StorageData {
       case SaveDataType.sxmToken:
       case SaveDataType.useNativeAuxInput:
       case SaveDataType.quitAuxWhenSuspended:
+      case SaveDataType.switchToAuxOnFocusGain:
+      case SaveDataType.autoConnectOnFocusGain:
       case SaveDataType.smallScreenMode:
+      case SaveDataType.ignoreSafeArea:
         record[key] = value;
         break;
     }
@@ -157,7 +269,10 @@ class StorageData {
       case SaveDataType.sxmToken:
       case SaveDataType.useNativeAuxInput:
       case SaveDataType.quitAuxWhenSuspended:
+      case SaveDataType.switchToAuxOnFocusGain:
+      case SaveDataType.autoConnectOnFocusGain:
       case SaveDataType.smallScreenMode:
+      case SaveDataType.ignoreSafeArea:
         return record[key];
     }
   }
@@ -292,5 +407,8 @@ enum SaveDataType {
   sxmToken,
   useNativeAuxInput,
   quitAuxWhenSuspended,
-  smallScreenMode
+  switchToAuxOnFocusGain,
+  autoConnectOnFocusGain,
+  smallScreenMode,
+  ignoreSafeArea
 }

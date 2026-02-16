@@ -149,12 +149,22 @@ class OrbitApp extends StatelessWidget {
                   (appState.textScale <= 0 ? 1.0 : appState.textScale)
                       .clamp(0.6, 2.0)
                       .toDouble();
+              final MediaQueryData scaled = mq.copyWith(
+                textScaler: TextScaler.linear(effectiveScale),
+                // Apply additional scaling to overall pixel ratio
+                devicePixelRatio: mq.devicePixelRatio * effectiveScale,
+              );
+
+              final MediaQueryData next = appState.ignoreSafeArea
+                  ? scaled.copyWith(
+                      padding: EdgeInsets.zero,
+                      viewPadding: EdgeInsets.zero,
+                      systemGestureInsets: EdgeInsets.zero,
+                    )
+                  : scaled;
+
               return MediaQuery(
-                data: mq.copyWith(
-                  textScaler: TextScaler.linear(effectiveScale),
-                  // Apply additional scaling to overall pixel ratio
-                  devicePixelRatio: mq.devicePixelRatio * effectiveScale,
-                ),
+                data: next,
                 child: child ?? const SizedBox.shrink(),
               );
             },
@@ -179,6 +189,7 @@ class MainPageState extends State<MainPage>
   static const String _setupDialogRouteUseAudio = 'setup.use_audio';
   static const String _setupDialogRouteSelectAudioDevice =
       'setup.select_audio_device';
+  static const String _connectionErrorDialogRoute = 'orbit.connection_error';
 
   late SXiLayer sxiLayer;
   late DeviceLayer deviceLayer;
@@ -221,6 +232,11 @@ class MainPageState extends State<MainPage>
   DateTime? _lastOnAirPromptAt;
   Timer? _onAirShowTimer;
   String? _pendingOnAirKey;
+  int? _lastAuxEnsureSid;
+  bool _auxEnsureInProgress = false;
+  DateTime? _lastAutoRetryAt;
+  bool _userRequestedDisconnect = false;
+  Future<void>? _connectionErrorDialogFuture;
 
   @override
   void initState() {
@@ -335,6 +351,7 @@ class MainPageState extends State<MainPage>
     SerialTransport transport = SerialTransport.serial,
     bool persistPort = true,
   }) async {
+    _userRequestedDisconnect = false;
     // Ensure any selection dialogs are gone so the main progress overlay is visible
     try {
       await clearAllMessages();
@@ -465,6 +482,7 @@ class MainPageState extends State<MainPage>
       logger.w('Startup sequence already in progress');
       return;
     }
+    _userRequestedDisconnect = false;
     _startupInProgress = true;
     _suppressFatalConnectionDialogs = true;
     _lastStartupConnectionError = null;
@@ -538,6 +556,14 @@ class MainPageState extends State<MainPage>
     }
   }
 
+  Future<void> disconnectFromDevice({bool userInitiated = true}) async {
+    _deviceConnected = false;
+    _userRequestedDisconnect = userInitiated;
+    try {
+      await deviceLayer.close();
+    } catch (_) {}
+  }
+
   // Try to startup the device layer
   Future<bool> tryStartup(
     String portString,
@@ -607,6 +633,9 @@ class MainPageState extends State<MainPage>
 
       final success = await deviceLayer.startupSequence();
       _deviceConnected = success;
+      if (success) {
+        _userRequestedDisconnect = false;
+      }
       if (!success && mounted) {
         setState(() {
           _isLoading = false;
@@ -637,6 +666,9 @@ class MainPageState extends State<MainPage>
       logger.f('Error: $details');
     } else {
       logger.e('Error: $details');
+    }
+    if (fatal) {
+      _deviceConnected = false;
     }
     if (fatal &&
         !_deviceConnected &&
@@ -766,9 +798,12 @@ class MainPageState extends State<MainPage>
   }
 
   void _showFatalErrorDialog(BuildContext context, String details) {
-    showDialog<void>(
+    if (_connectionErrorDialogFuture != null) return;
+
+    _connectionErrorDialogFuture = showDialog<void>(
       context: context,
       barrierDismissible: false,
+      routeSettings: const RouteSettings(name: _connectionErrorDialogRoute),
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Connection Error'),
@@ -797,7 +832,9 @@ class MainPageState extends State<MainPage>
           ],
         );
       },
-    );
+    ).whenComplete(() {
+      _connectionErrorDialogFuture = null;
+    });
   }
 
   Future<void> _attemptCloseApp() async {
@@ -1059,6 +1096,11 @@ class MainPageState extends State<MainPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed) {
+      _autoRetryConnectionOnResume();
+    }
+
     if (defaultTargetPlatform != TargetPlatform.android ||
         !HeadUnitAux.isAvailable ||
         !appState.useNativeAuxInput) {
@@ -1067,6 +1109,7 @@ class MainPageState extends State<MainPage>
 
     if (state == AppLifecycleState.resumed) {
       // Switch head unit to aux when resuming
+      if (!appState.switchToAuxOnFocusGain) return;
       final bool isPlaying = appState.playbackState == AppPlaybackState.live ||
           appState.playbackState == AppPlaybackState.recordedContent;
       if (!isPlaying && !appState.audioPresence) return;
@@ -1075,11 +1118,35 @@ class MainPageState extends State<MainPage>
     }
 
     if (!appState.quitAuxWhenSuspended) return;
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached) {
+    if (state == AppLifecycleState.detached) {
       unawaited(HeadUnitAux.tryExitAux(timeoutMs: 750));
     }
+  }
+
+  void _autoRetryConnectionOnResume() {
+    if (!mounted) return;
+    if (_deviceConnected) return;
+    if (!appState.autoConnectOnFocusGain) return;
+    if (_startupInProgress) return;
+    if (_userRequestedDisconnect) return;
+
+    final now = DateTime.now();
+    final last = _lastAutoRetryAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastAutoRetryAt = now;
+
+    try {
+      Navigator.of(context, rootNavigator: true).popUntil(
+        (route) => route.settings.name != _connectionErrorDialogRoute,
+      );
+    } catch (_) {}
+
+    try {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    } catch (_) {}
+    startupSequence();
   }
 
   void onFavoriteOnAir() {
@@ -1134,6 +1201,12 @@ class MainPageState extends State<MainPage>
     }
     var playbackInfo = appState.nowPlaying;
 
+    // Ensure the head unit is still on aux when the tuned channel changes
+    if (playbackInfo.sid != 0 && playbackInfo.sid != _lastAuxEnsureSid) {
+      _lastAuxEnsureSid = playbackInfo.sid;
+      unawaited(_ensureNativeAuxSelected());
+    }
+
     setState(() {
       channelTextController.text = playbackInfo.channelNumber.toString();
     });
@@ -1160,6 +1233,28 @@ class MainPageState extends State<MainPage>
 
     updateTransport();
     audioServiceHandler?.onPlaybackInfoChanged(playbackInfo);
+  }
+
+  Future<void> _ensureNativeAuxSelected() async {
+    if (_auxEnsureInProgress) return;
+    if (defaultTargetPlatform != TargetPlatform.android ||
+        !HeadUnitAux.isAvailable ||
+        !appState.useNativeAuxInput) {
+      return;
+    }
+
+    final bool isPlaying = appState.playbackState == AppPlaybackState.live ||
+        appState.playbackState == AppPlaybackState.recordedContent;
+    if (!isPlaying && !appState.audioPresence) return;
+
+    _auxEnsureInProgress = true;
+    try {
+      final status = await HeadUnitAux.tryIsCurrentInputAux(timeoutMs: 450);
+      if (status.isAux) return;
+      unawaited(HeadUnitAux.trySwitchToAux(timeoutMs: 1500));
+    } finally {
+      _auxEnsureInProgress = false;
+    }
   }
 
   // Update the playback state

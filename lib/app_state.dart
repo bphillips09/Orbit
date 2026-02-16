@@ -41,12 +41,15 @@ class AppState extends ChangeNotifier {
   bool debugMode = false;
   bool analyticsDisabled = false;
   bool smallScreenMode = false;
+  bool ignoreSafeArea = false;
   // Android-only: preferred audio output route
   String androidAudioOutputRoute = 'Speaker';
   bool detectAudioInterruptions = true;
   // Android-only: if true, use head unit native aux input instead of app playback
   bool useNativeAuxInput = false;
   bool quitAuxWhenSuspended = true;
+  bool switchToAuxOnFocusGain = true;
+  bool autoConnectOnFocusGain = true;
   bool isScanActive = false;
   bool isTuneMixActive = false;
   ThemeMode themeMode = ThemeMode.dark;
@@ -365,6 +368,11 @@ class AppState extends ChangeNotifier {
       defaultValue: false,
     );
 
+    ignoreSafeArea = await storageData.load(
+      SaveDataType.ignoreSafeArea,
+      defaultValue: false,
+    );
+
     if (smallScreenMode) {
       const double desiredTextScale = 1.8;
       const double desiredUiScale = 600.0;
@@ -412,9 +420,20 @@ class AppState extends ChangeNotifier {
       defaultValue: false,
     );
 
-    // Load "quit aux-in when suspended" preference
+    // Load "quit aux-in when quitting" preference
     quitAuxWhenSuspended = await storageData.load(
       SaveDataType.quitAuxWhenSuspended,
+      defaultValue: true,
+    );
+
+    // Load "switch to aux on focus gain" preference
+    switchToAuxOnFocusGain = await storageData.load(
+      SaveDataType.switchToAuxOnFocusGain,
+      defaultValue: true,
+    );
+
+    autoConnectOnFocusGain = await storageData.load(
+      SaveDataType.autoConnectOnFocusGain,
       defaultValue: true,
     );
 
@@ -633,6 +652,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateIgnoreSafeArea(bool value) {
+    ignoreSafeArea = value;
+    storageData.save(SaveDataType.ignoreSafeArea, value);
+    notifyListeners();
+  }
+
   void updateWelcomeSeen(bool seen) {
     welcomeSeen = seen;
     storageData.save(SaveDataType.welcomeSeen, welcomeSeen);
@@ -662,6 +687,18 @@ class AppState extends ChangeNotifier {
   void updateQuitAuxWhenSuspended(bool value) {
     quitAuxWhenSuspended = value;
     storageData.save(SaveDataType.quitAuxWhenSuspended, value);
+    notifyListeners();
+  }
+
+  void updateSwitchToAuxOnFocusGain(bool value) {
+    switchToAuxOnFocusGain = value;
+    storageData.save(SaveDataType.switchToAuxOnFocusGain, value);
+    notifyListeners();
+  }
+
+  void updateAutoConnectOnFocusGain(bool value) {
+    autoConnectOnFocusGain = value;
+    storageData.save(SaveDataType.autoConnectOnFocusGain, value);
     notifyListeners();
   }
 

@@ -53,9 +53,15 @@ class AudioServiceHandler extends BaseAudioHandler
     logger.d('---> PREV |<');
     switch (appState.mediaKeyBehavior) {
       case MediaKeyBehavior.channel:
+        final ch =
+            nowPlaying?.channelNumber ?? appState.nowPlaying.channelNumber;
+        if (ch <= 0) {
+          logger.w('Skip previous ignored: current channel unknown');
+          return;
+        }
         deviceLayer.sendControlCommand(SXiSelectChannelCommand(
             ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
-            nowPlaying!.channelNumber,
+            ch,
             0xFF,
             ChannelAttributes.all(),
             AudioRoutingType.routeToAudio));
@@ -74,9 +80,15 @@ class AudioServiceHandler extends BaseAudioHandler
     logger.d('---> NEXT >|');
     switch (appState.mediaKeyBehavior) {
       case MediaKeyBehavior.channel:
+        final ch =
+            nowPlaying?.channelNumber ?? appState.nowPlaying.channelNumber;
+        if (ch <= 0) {
+          logger.w('Skip next ignored: current channel unknown');
+          return;
+        }
         deviceLayer.sendControlCommand(SXiSelectChannelCommand(
             ChanSelectionType.tuneToNextHigherChannelNumberInCategory,
-            nowPlaying!.channelNumber,
+            ch,
             0xFF,
             ChannelAttributes.all(),
             AudioRoutingType.routeToAudio));
@@ -178,23 +190,23 @@ class AudioServiceHandler extends BaseAudioHandler
     // Ensure browser tab shows as playing on web if there's any audio
     NowPlayingIndicator.update(isPlaying: true);
 
+    final controls = <MediaControl>[
+      MediaControl.skipToPrevious,
+      if (playing) MediaControl.pause else MediaControl.play,
+      MediaControl.stop,
+      MediaControl.skipToNext,
+    ];
+
     playbackState.add(playbackState.value.copyWith(
-        controls: [
-          MediaControl.skipToPrevious,
-          // MediaControl.rewind,
-          MediaControl.play,
-          MediaControl.pause,
-          MediaControl.stop,
-          // MediaControl.fastForward,
-          MediaControl.skipToNext,
-        ],
-        systemActions: {
-          MediaAction.seek,
-        },
-        processingState: AudioProcessingState.ready,
-        playing: playing,
-        updatePosition: Duration(seconds: appState.playbackTimeBefore.toInt()),
-        speed: 1));
+      controls: controls,
+      systemActions: {
+        MediaAction.seek,
+      },
+      processingState: AudioProcessingState.ready,
+      playing: playing,
+      updatePosition: Duration(seconds: appState.playbackTimeBefore.toInt()),
+      speed: 1,
+    ));
   }
 
   void onPlaybackInfoChanged(PlaybackInfo playbackInfo) async {

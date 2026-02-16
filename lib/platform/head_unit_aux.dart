@@ -25,7 +25,7 @@ class HeadUnitAux {
     return opened;
   }
 
-  // Exit aux input (backend-dependent; FYT sets AppId back to 0)
+  // Exit aux input
   static Future<bool> exitAux({int timeoutMs = 1500}) async {
     if (!isAvailable) {
       throw UnsupportedError('Head unit aux input switching is Android-only.');
@@ -39,6 +39,22 @@ class HeadUnitAux {
           code: 'NULL_RESULT', message: 'exitAux returned null');
     }
     return exited;
+  }
+
+  // Whether the current input is aux
+  static Future<bool> isCurrentInputAux({int timeoutMs = 1500}) async {
+    if (!isAvailable) {
+      throw UnsupportedError('Head unit aux input is Android-only');
+    }
+    final isAux = await _channel.invokeMethod<bool>(
+      'isCurrentInputAux',
+      {'timeoutMs': timeoutMs},
+    );
+    if (isAux == null) {
+      throw PlatformException(
+          code: 'NULL_RESULT', message: 'isCurrentInputAux returned null');
+    }
+    return isAux;
   }
 
   static String describeError(Object error) {
@@ -93,7 +109,8 @@ class HeadUnitAux {
       if (exited) {
         logger.i('HeadUnitAux: exited aux input');
       } else {
-        logger.w('HeadUnitAux: aux input may still be active after exit request');
+        logger
+            .w('HeadUnitAux: aux input may still be active after exit request');
         return (
           exited: false,
           errorMessage: 'Aux input did not exit',
@@ -105,6 +122,19 @@ class HeadUnitAux {
       logger.e('HeadUnitAux: failed to exit aux input',
           error: e, stackTrace: st);
       return (exited: false, errorMessage: msg);
+    }
+  }
+
+  static Future<({bool isAux, String? errorMessage})> tryIsCurrentInputAux(
+      {int timeoutMs = 1500}) async {
+    if (!isAvailable) {
+      return (isAux: false, errorMessage: 'Not supported on this platform.');
+    }
+    try {
+      final isAux = await isCurrentInputAux(timeoutMs: timeoutMs);
+      return (isAux: isAux, errorMessage: null);
+    } catch (e) {
+      return (isAux: false, errorMessage: describeError(e));
     }
   }
 }
