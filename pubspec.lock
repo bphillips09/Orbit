@@ -34,7 +34,7 @@ packages:
     source: hosted
     version: "0.4.1"
   archive:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: archive
       sha256: "2fde1607386ab523f7a36bb3e7edb43bd58e6edaf2ffb29d8a6d578b297fdbbd"
@@ -1399,7 +1399,7 @@ packages:
     source: hosted
     version: "0.3.1"
   universal_io:
-    dependency: "direct overridden"
+    dependency: "direct main"
     description:
       name: universal_io
       sha256: f63cbc48103236abf48e345e07a03ce5757ea86285ed313a6a032596ed9301e2

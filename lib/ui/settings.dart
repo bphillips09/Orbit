@@ -1,10 +1,13 @@
 // Settings Page
-import 'dart:io';
 import 'dart:math';
 import 'package:android_intent_plus/android_intent.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:open_file/open_file.dart';
+import 'package:orbit/config/config_transfer.dart';
+import 'package:orbit/platform/app_restart.dart';
+import 'package:orbit/platform/download_bytes.dart';
 import 'package:orbit/data/handlers/channel_graphics_handler.dart';
 import 'package:orbit/platform/head_unit_aux.dart';
 import 'package:orbit/serial_helper/serial_helper_interface.dart';
@@ -28,6 +31,7 @@ import 'package:orbit/logging.dart';
 import 'package:logger/logger.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:universal_io/io.dart';
 import 'dart:convert';
 
 class SettingsPage extends StatelessWidget {
@@ -275,7 +279,7 @@ class SettingsPage extends StatelessWidget {
 
                     // Close current connection if any
                     try {
-                      await mainPage.deviceLayer.close();
+                      await mainPage.disconnectFromDevice(userInitiated: false);
                     } catch (_) {}
                     if (!context.mounted) return;
 
@@ -307,7 +311,8 @@ class SettingsPage extends StatelessWidget {
                   'Close Port',
                   'Disconnect from current port',
                   Icons.close,
-                  onTap: () => mainPage.deviceLayer.close(),
+                  onTap: () =>
+                      mainPage.disconnectFromDevice(userInitiated: true),
                   isDestructive: true,
                 ),
               ],
@@ -497,11 +502,26 @@ class SettingsPage extends StatelessWidget {
                 ),
                 _buildSettingTile(
                   context,
-                  'Open Data Directory',
-                  'Open the directory where application data is stored',
-                  Icons.folder_open,
-                  onTap: () => _openSupportDirectory(),
+                  'Export Config',
+                  'Export current configuration',
+                  Icons.archive,
+                  onTap: () => _exportConfigZip(context, appState),
                 ),
+                _buildSettingTile(
+                  context,
+                  'Import Config',
+                  'Import new configuration',
+                  Icons.unarchive,
+                  onTap: () => _importConfigZip(context, appState),
+                ),
+                if (!kIsWeb && !kIsWasm)
+                  _buildSettingTile(
+                    context,
+                    'Open Data Directory',
+                    'Open the directory where application data is stored',
+                    Icons.folder_open,
+                    onTap: () => _openSupportDirectory(),
+                  ),
                 _buildSettingTile(
                   context,
                   'Clear All Data',
@@ -2025,6 +2045,190 @@ class SettingsPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<T> _runWithBlockingProgress<T>(
+    BuildContext context,
+    Future<T> Function() action, {
+    String message = 'Working...',
+  }) async {
+    if (!context.mounted) {
+      throw StateError('Context is not mounted.');
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      return await action();
+    } finally {
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+    }
+  }
+
+  Future<void> _exportConfigZip(BuildContext context, AppState appState) async {
+    try {
+      final now = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .replaceAll('.', '-');
+      final filename = 'orbit-config-$now.zip';
+
+      final Uint8List zipBytes = await _runWithBlockingProgress(
+        context,
+        () => OrbitConfigTransfer.buildZipBytes(
+            storageData: appState.storageData),
+        message: 'Building config zip...',
+      );
+
+      if (kIsWeb || kIsWasm) {
+        downloadBytes(zipBytes,
+            filename: filename, mimeType: 'application/zip');
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Downloading config zip...')),
+        );
+        return;
+      }
+
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Export Orbit Config',
+        fileName: filename,
+        type: FileType.custom,
+        allowedExtensions: const ['zip'],
+      );
+      if (savePath == null || savePath.trim().isEmpty) return;
+
+      var outPath = savePath;
+      if (!outPath.toLowerCase().endsWith('.zip')) {
+        outPath = '$outPath.zip';
+      }
+
+      await File(outPath).writeAsBytes(zipBytes, flush: true);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exported config to $outPath')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Export failed'),
+          content: Text(e.toString()),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Future<void> _importConfigZip(BuildContext context, AppState appState) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        dialogTitle: 'Import Orbit Config Zip',
+        type: FileType.custom,
+        allowedExtensions: const ['zip'],
+        withData: kIsWeb || kIsWasm,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      Uint8List? zipBytes;
+      final picked = result.files.single;
+      if (kIsWeb || kIsWasm) {
+        zipBytes = picked.bytes;
+      } else {
+        final path = picked.path;
+        if (path == null || path.trim().isEmpty) {
+          throw StateError('Selected file path is unavailable.');
+        }
+        zipBytes = await File(path).readAsBytes();
+      }
+
+      if (zipBytes == null || zipBytes.isEmpty) {
+        throw StateError('Failed to read zip bytes.');
+      }
+
+      if (!context.mounted) return;
+      final proceed = (await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Import config?'),
+              content: const Text(
+                'This will overwrite the selected parts of your Orbit config.',
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Import'),
+                ),
+              ],
+            ),
+          )) ??
+          false;
+      if (!context.mounted) return;
+      if (!proceed) return;
+
+      await _runWithBlockingProgress(
+        context,
+        () async {
+          await OrbitConfigTransfer.importFromZipBytes(
+            zipBytes: zipBytes!,
+            storageData: appState.storageData,
+          );
+        },
+        message: 'Importing config...',
+      );
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Imported config. Restarting...')),
+      );
+
+      // Give the snackbar a beat to paint
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      requestAppRestart();
+    } catch (e) {
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Import failed'),
+          content: Text(e.toString()),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   Future<bool> _openSupportDirectory() async {
