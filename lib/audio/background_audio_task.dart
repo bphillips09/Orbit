@@ -172,8 +172,12 @@ class AudioServiceHandler extends BaseAudioHandler
 
   void onPlaybackStateChanged(AppPlaybackState appPlaybackState) {
     logger.d('---> Process State Change');
-    bool playing = appPlaybackState == AppPlaybackState.live ||
-        appPlaybackState == AppPlaybackState.recordedContent;
+    final bool playing = appPlaybackState == AppPlaybackState.live ||
+        appPlaybackState == AppPlaybackState.recordedContent ||
+        (defaultTargetPlatform == TargetPlatform.android &&
+            appState.useNativeAuxInput &&
+            appState.audioPresence &&
+            appState.hasAudioFocus);
 
     // Switch head unit to aux when system transitions to playing
     final bool wasPlaying = _lastPlaybackState == AppPlaybackState.live ||
@@ -188,7 +192,7 @@ class AudioServiceHandler extends BaseAudioHandler
     }
 
     // Ensure browser tab shows as playing on web if there's any audio
-    NowPlayingIndicator.update(isPlaying: true);
+    NowPlayingIndicator.update(isPlaying: playing);
 
     final controls = <MediaControl>[
       MediaControl.skipToPrevious,

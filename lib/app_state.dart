@@ -74,6 +74,8 @@ class AppState extends ChangeNotifier {
       PropertyValueNotifier(PlaybackInfo.empty());
   final ValueNotifier<AppPlaybackState> playbackStateNotifier =
       ValueNotifier(AppPlaybackState.stopped);
+  final ValueNotifier<bool> audioPresenceNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> audioFocusNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<FavoriteOnAirEvent?> favoriteOnAirNotifier =
       ValueNotifier<FavoriteOnAirEvent?>(null);
 
@@ -92,6 +94,7 @@ class AppState extends ChangeNotifier {
   int _signalStatus = 0;
   bool _antennaConnected = false;
   bool _audioExpected = false;
+  bool _hasAudioFocus = false;
   int _audioDecoderBitrate = 0;
   SignalQuality? _baseSignalQuality;
   OverlaySignalQuality? _overlaySignalQualityData;
@@ -160,6 +163,7 @@ class AppState extends ChangeNotifier {
   OverlaySignalQuality? get overlaySignalQualityData =>
       _overlaySignalQualityData;
   bool get audioPresence => _audioExpected;
+  bool get hasAudioFocus => _hasAudioFocus;
   int get audioDecoderBitrate => _audioDecoderBitrate;
 
   // System info getters
@@ -822,6 +826,14 @@ class AppState extends ChangeNotifier {
 
   void updateAudioExpectedStatus(bool audioExpected) {
     _audioExpected = audioExpected;
+    audioPresenceNotifier.value = audioExpected;
+    notifyListeners();
+  }
+
+  void updateHasAudioFocus(bool hasFocus) {
+    if (_hasAudioFocus == hasFocus) return;
+    _hasAudioFocus = hasFocus;
+    audioFocusNotifier.value = hasFocus;
     notifyListeners();
   }
 

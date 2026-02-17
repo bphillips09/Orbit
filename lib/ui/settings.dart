@@ -1,5 +1,6 @@
 // Settings Page
 import 'dart:math';
+import 'package:audio_session/audio_session.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -364,6 +365,17 @@ class SettingsPage extends StatelessWidget {
                         }
                         return;
                       }
+
+                      try {
+                        final session = await AudioSession.instance;
+                        final ok = await session.setActive(
+                          true,
+                          androidWillPauseWhenDucked:
+                              appState.detectAudioInterruptions,
+                        );
+                        appState.updateHasAudioFocus(ok);
+                      } catch (_) {}
+
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(

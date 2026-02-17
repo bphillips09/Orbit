@@ -241,6 +241,8 @@ class MainPageState extends State<MainPage>
   DateTime? _lastAutoRetryAt;
   bool _userRequestedDisconnect = false;
   Future<void>? _connectionErrorDialogFuture;
+  StreamSubscription<AudioInterruptionEvent>? _appInterruptionSub;
+  bool _isAppResumed = true;
 
   @override
   void initState() {
@@ -286,7 +288,7 @@ class MainPageState extends State<MainPage>
     appState.initialize().then((_) async {
       Telemetry.event("app_started", {"first_run": !appState.welcomeSeen});
 
-      var session = await AudioSession.instance;
+      final session = await AudioSession.instance;
       await session.configure(
         // Configure the AudioSession
         const AudioSessionConfiguration(
@@ -302,6 +304,7 @@ class MainPageState extends State<MainPage>
       );
 
       logger.i('AudioSession configured success');
+      _startAudioFocusMonitoring();
 
       // Show first-time welcome
       if (!appState.welcomeSeen) {
@@ -318,6 +321,8 @@ class MainPageState extends State<MainPage>
       // Listen for playback changes
       appState.playbackInfoNotifier.addListener(onPlaybackInfoChanged);
       appState.playbackStateNotifier.addListener(onPlaybackStateChanged);
+      appState.audioPresenceNotifier.addListener(_onAudioPresenceChanged);
+      appState.audioFocusNotifier.addListener(_onAudioFocusChanged);
       appState.favoriteOnAirNotifier.addListener(onFavoriteOnAir);
 
       try {
@@ -418,6 +423,18 @@ class MainPageState extends State<MainPage>
       await clearAllMessages();
       await setupAudio();
       onPlaybackStateChanged();
+      // Activate audio session when connected
+      try {
+        final session = await AudioSession.instance;
+        final ok = await session.setActive(
+          true,
+          androidWillPauseWhenDucked: appState.detectAudioInterruptions,
+        );
+        logger.i('AudioSession setActive(true) onConnected: $ok');
+        appState.updateHasAudioFocus(ok);
+      } catch (e, st) {
+        logger.w('AudioSession setActive(true) onConnected failed: $e\n$st');
+      }
       _startupCompleted = true;
     } finally {
       _startupCompletionInProgress = false;
@@ -566,6 +583,13 @@ class MainPageState extends State<MainPage>
     try {
       await deviceLayer.close();
     } catch (_) {}
+    // Release audio focus when disconnected
+    try {
+      final session = await AudioSession.instance;
+      final ok = await session.setActive(false);
+      logger.i('AudioSession setActive(false) onDisconnect: $ok');
+    } catch (_) {}
+    appState.updateHasAudioFocus(false);
   }
 
   // Try to startup the device layer
@@ -1089,20 +1113,113 @@ class MainPageState extends State<MainPage>
     }
     deviceLayer.close();
     audioController.dispose();
+    try {
+      unawaited(_appInterruptionSub?.cancel());
+    } catch (_) {}
     appState.playbackInfoNotifier.removeListener(onPlaybackInfoChanged);
     appState.playbackStateNotifier.removeListener(onPlaybackStateChanged);
+    appState.audioPresenceNotifier.removeListener(_onAudioPresenceChanged);
+    appState.audioFocusNotifier.removeListener(_onAudioFocusChanged);
     appState.favoriteOnAirNotifier.removeListener(onFavoriteOnAir);
     _onAirShowTimer?.cancel();
     channelTextFocusNode.dispose();
     super.dispose();
   }
 
+  void _onAudioPresenceChanged() {
+    // Keep Android media session state in sync with actual audio presence
+    onPlaybackStateChanged();
+    unawaited(_ensureNativeAuxSelected());
+  }
+
+  void _onAudioFocusChanged() {
+    // Ensure audio_service reflects focus changes
+    onPlaybackStateChanged();
+  }
+
+  void _startAudioFocusMonitoring() {
+    // Listen even when audio is disabled
+    unawaited(() async {
+      try {
+        await _appInterruptionSub?.cancel();
+      } catch (_) {}
+      try {
+        final session = await AudioSession.instance;
+        _appInterruptionSub = session.interruptionEventStream.listen((event) {
+          if (!mounted) return;
+          if (event.begin) {
+            appState.updateHasAudioFocus(false);
+          } else {
+            // Only treat focus as regained if app is resumed
+            if (_isAppResumed) {
+              appState.updateHasAudioFocus(true);
+            }
+          }
+        });
+      } catch (e, st) {
+        logger.w('Audio focus monitoring setup failed: $e\n$st');
+      }
+    }());
+  }
+
+  Future<void> _requestAudioFocusForAuxIfNeeded() async {
+    if (defaultTargetPlatform != TargetPlatform.android ||
+        !HeadUnitAux.isAvailable ||
+        !appState.useNativeAuxInput) {
+      return;
+    }
+    if (!_deviceConnected) return;
+
+    // Only request focus when actually expected to be the active source
+    final bool shouldBeSource = appState.audioPresence ||
+        appState.playbackState == AppPlaybackState.live ||
+        appState.playbackState == AppPlaybackState.recordedContent;
+    if (!shouldBeSource) return;
+
+    try {
+      final session = await AudioSession.instance;
+      final ok = await session.setActive(
+        true,
+        androidWillPauseWhenDucked: appState.detectAudioInterruptions,
+      );
+      logger.i('AudioSession setActive(true) onResume(nativeAux): $ok');
+      appState.updateHasAudioFocus(ok);
+    } catch (e, st) {
+      logger.w(
+          'AudioSession setActive(true) onResume(nativeAux) failed: $e\n$st');
+    }
+  }
+
+  Future<void> _releaseAudioFocusForAuxIfNeeded() async {
+    if (defaultTargetPlatform != TargetPlatform.android ||
+        !HeadUnitAux.isAvailable ||
+        !appState.useNativeAuxInput) {
+      return;
+    }
+    try {
+      final session = await AudioSession.instance;
+      final ok = await session.setActive(false);
+      logger.i('AudioSession setActive(false) onPause(nativeAux): $ok');
+    } catch (_) {}
+    appState.updateHasAudioFocus(false);
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+    _isAppResumed = state == AppLifecycleState.resumed;
 
     if (state == AppLifecycleState.resumed) {
-      _autoRetryConnectionOnResume();
+      if (appState.restartPending) return;
+      unawaited(_autoRetryConnectionOnResume());
+      // In native aux mode, request audio focus when foregrounded
+      unawaited(_requestAudioFocusForAuxIfNeeded());
+    }
+
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      // Yield media keys to other apps when backgrounded
+      unawaited(_releaseAudioFocusForAuxIfNeeded());
     }
 
     if (defaultTargetPlatform != TargetPlatform.android ||
@@ -1123,6 +1240,7 @@ class MainPageState extends State<MainPage>
 
     if (!appState.quitAuxWhenSuspended) return;
     if (state == AppLifecycleState.detached) {
+      unawaited(_releaseAudioFocusForAuxIfNeeded());
       unawaited(HeadUnitAux.tryExitAux(timeoutMs: 750));
     }
   }
