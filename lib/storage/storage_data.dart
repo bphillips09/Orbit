@@ -155,125 +155,138 @@ class StorageData {
   }
 
   Future<void> save(SaveDataType saveDataType, dynamic value) async {
-    logger.t('Saving $saveDataType: $value');
+    try {
+      logger.t('Saving $saveDataType: $value');
 
-    final key = saveDataType.name;
-    final Map<String, dynamic> record = {};
+      final key = saveDataType.name;
+      final Map<String, dynamic> record = {};
 
-    switch (saveDataType) {
-      case SaveDataType.eq:
-        record[key] = value.toList();
-        break;
-      case SaveDataType.presets:
-        if (value is List<Preset>) {
-          for (int i = 0; i < value.length; i++) {
-            record[i.toString()] = {
-              'sid': value[i].sid,
-              'channelNumber': value[i].channelNumber,
-              'channelName': value[i].channelName,
-            };
+      switch (saveDataType) {
+        case SaveDataType.eq:
+          record[key] = value.toList();
+          break;
+        case SaveDataType.presets:
+          if (value is List<Preset>) {
+            for (int i = 0; i < value.length; i++) {
+              record[i.toString()] = {
+                'sid': value[i].sid,
+                'channelNumber': value[i].channelNumber,
+                'channelName': value[i].channelName,
+              };
+            }
           }
-        }
-        break;
-      case SaveDataType.favorites:
-        if (value is List<Favorite>) {
-          record[key] = value.map((f) => f.toMap()).toList();
-        } else {
-          record[key] = [];
-        }
-        break;
-      case SaveDataType.lastSid:
-      case SaveDataType.lastPort:
-      case SaveDataType.lastPortTransport:
-      case SaveDataType.lastAudioDevice:
-      case SaveDataType.audioOutputRoute:
-      case SaveDataType.enableAudio:
-      case SaveDataType.tuneStart:
-      case SaveDataType.sliderSnapping:
-      case SaveDataType.showOnAirFavoritesPrompt:
-      case SaveDataType.welcomeSeen:
-      case SaveDataType.debugMode:
-      case SaveDataType.themeMode:
-      case SaveDataType.textScale:
-      case SaveDataType.logLevel:
-      case SaveDataType.linkTraceEnabled:
-      case SaveDataType.monitoredDataServices:
-      case SaveDataType.secondaryBaudRate:
-      case SaveDataType.audioSampleRate:
-      case SaveDataType.mediaKeyBehavior:
-      case SaveDataType.interfaceScale:
-      case SaveDataType.analyticsDisabled:
-      case SaveDataType.detectAudioInterruptions:
-      case SaveDataType.sxmToken:
-      case SaveDataType.useNativeAuxInput:
-      case SaveDataType.quitAuxWhenSuspended:
-      case SaveDataType.switchToAuxOnFocusGain:
-      case SaveDataType.autoConnectOnFocusGain:
-      case SaveDataType.smallScreenMode:
-      case SaveDataType.ignoreSafeArea:
-        record[key] = value;
-        break;
-    }
+          break;
+        case SaveDataType.favorites:
+          if (value is List<Favorite>) {
+            record[key] = value.map((f) => f.toMap()).toList();
+          } else {
+            record[key] = [];
+          }
+          break;
+        case SaveDataType.lastSid:
+        case SaveDataType.lastPort:
+        case SaveDataType.lastPortTransport:
+        case SaveDataType.lastAudioDevice:
+        case SaveDataType.audioOutputRoute:
+        case SaveDataType.enableAudio:
+        case SaveDataType.tuneStart:
+        case SaveDataType.sliderSnapping:
+        case SaveDataType.showOnAirFavoritesPrompt:
+        case SaveDataType.welcomeSeen:
+        case SaveDataType.debugMode:
+        case SaveDataType.themeMode:
+        case SaveDataType.textScale:
+        case SaveDataType.logLevel:
+        case SaveDataType.linkTraceEnabled:
+        case SaveDataType.logOverlayEnabled:
+        case SaveDataType.monitoredDataServices:
+        case SaveDataType.secondaryBaudRate:
+        case SaveDataType.audioSampleRate:
+        case SaveDataType.mediaKeyBehavior:
+        case SaveDataType.interfaceScale:
+        case SaveDataType.analyticsDisabled:
+        case SaveDataType.detectAudioInterruptions:
+        case SaveDataType.sxmToken:
+        case SaveDataType.useNativeAuxInput:
+        case SaveDataType.quitAuxWhenSuspended:
+        case SaveDataType.switchToAuxOnFocusGain:
+        case SaveDataType.autoConnectOnFocusGain:
+        case SaveDataType.smallScreenMode:
+        case SaveDataType.ignoreSafeArea:
+          record[key] = value;
+          break;
+      }
 
-    await _saveDataStore.record(key).put(_mainDb, record);
+      await _saveDataStore.record(key).put(_mainDb, record);
+    } catch (e, st) {
+      logger.w('Storage save failed for $saveDataType: $e',
+          error: e, stackTrace: st);
+    }
   }
 
   Future<dynamic> load(SaveDataType saveDataType,
       {dynamic defaultValue}) async {
-    logger.t('Loading $saveDataType');
-    final key = saveDataType.name;
-    final record =
-        await _saveDataStore.record(key).get(_mainDb) as Map<String, dynamic>?;
-    if (record == null) return defaultValue;
+    try {
+      logger.t('Loading $saveDataType');
+      final key = saveDataType.name;
+      final record = await _saveDataStore.record(key).get(_mainDb)
+          as Map<String, dynamic>?;
+      if (record == null) return defaultValue;
 
-    switch (saveDataType) {
-      case SaveDataType.eq:
-        return Int8List.fromList(List<int>.from(record[key]));
-      case SaveDataType.presets:
-        var presetData = record.values;
+      switch (saveDataType) {
+        case SaveDataType.eq:
+          return Int8List.fromList(List<int>.from(record[key]));
+        case SaveDataType.presets:
+          var presetData = record.values;
 
-        return presetData
-            .map((data) => Preset(
-                  sid: data['sid'] as int,
-                  channelNumber: data['channelNumber'] as int,
-                  channelName: data['channelName'] as String,
-                ))
-            .toList();
-      case SaveDataType.favorites:
-        final List<dynamic> list = (record[key] as List?) ?? const [];
-        return list
-            .map((e) => Favorite.fromMap(Map<String, dynamic>.from(e)))
-            .toList();
-      case SaveDataType.lastSid:
-      case SaveDataType.lastPort:
-      case SaveDataType.lastPortTransport:
-      case SaveDataType.lastAudioDevice:
-      case SaveDataType.audioOutputRoute:
-      case SaveDataType.enableAudio:
-      case SaveDataType.tuneStart:
-      case SaveDataType.sliderSnapping:
-      case SaveDataType.showOnAirFavoritesPrompt:
-      case SaveDataType.welcomeSeen:
-      case SaveDataType.debugMode:
-      case SaveDataType.themeMode:
-      case SaveDataType.textScale:
-      case SaveDataType.logLevel:
-      case SaveDataType.linkTraceEnabled:
-      case SaveDataType.monitoredDataServices:
-      case SaveDataType.secondaryBaudRate:
-      case SaveDataType.audioSampleRate:
-      case SaveDataType.mediaKeyBehavior:
-      case SaveDataType.interfaceScale:
-      case SaveDataType.analyticsDisabled:
-      case SaveDataType.detectAudioInterruptions:
-      case SaveDataType.sxmToken:
-      case SaveDataType.useNativeAuxInput:
-      case SaveDataType.quitAuxWhenSuspended:
-      case SaveDataType.switchToAuxOnFocusGain:
-      case SaveDataType.autoConnectOnFocusGain:
-      case SaveDataType.smallScreenMode:
-      case SaveDataType.ignoreSafeArea:
-        return record[key];
+          return presetData
+              .map((data) => Preset(
+                    sid: data['sid'] as int,
+                    channelNumber: data['channelNumber'] as int,
+                    channelName: data['channelName'] as String,
+                  ))
+              .toList();
+        case SaveDataType.favorites:
+          final List<dynamic> list = (record[key] as List?) ?? const [];
+          return list
+              .map((e) => Favorite.fromMap(Map<String, dynamic>.from(e)))
+              .toList();
+        case SaveDataType.lastSid:
+        case SaveDataType.lastPort:
+        case SaveDataType.lastPortTransport:
+        case SaveDataType.lastAudioDevice:
+        case SaveDataType.audioOutputRoute:
+        case SaveDataType.enableAudio:
+        case SaveDataType.tuneStart:
+        case SaveDataType.sliderSnapping:
+        case SaveDataType.showOnAirFavoritesPrompt:
+        case SaveDataType.welcomeSeen:
+        case SaveDataType.debugMode:
+        case SaveDataType.themeMode:
+        case SaveDataType.textScale:
+        case SaveDataType.logLevel:
+        case SaveDataType.linkTraceEnabled:
+        case SaveDataType.logOverlayEnabled:
+        case SaveDataType.monitoredDataServices:
+        case SaveDataType.secondaryBaudRate:
+        case SaveDataType.audioSampleRate:
+        case SaveDataType.mediaKeyBehavior:
+        case SaveDataType.interfaceScale:
+        case SaveDataType.analyticsDisabled:
+        case SaveDataType.detectAudioInterruptions:
+        case SaveDataType.sxmToken:
+        case SaveDataType.useNativeAuxInput:
+        case SaveDataType.quitAuxWhenSuspended:
+        case SaveDataType.switchToAuxOnFocusGain:
+        case SaveDataType.autoConnectOnFocusGain:
+        case SaveDataType.smallScreenMode:
+        case SaveDataType.ignoreSafeArea:
+          return record[key];
+      }
+    } catch (e, st) {
+      logger.w('Storage load failed for $saveDataType: $e',
+          error: e, stackTrace: st);
+      return defaultValue;
     }
   }
 
@@ -359,22 +372,35 @@ class StorageData {
   }
 
   Future<void> deleteAll() async {
-    // Clear main app data
-    await _saveDataStore.delete(_mainDb);
+    try {
+      // Clear main app data
+      await _saveDataStore.delete(_mainDb);
 
-    // Clear image/graphics data from image DB
-    await _graphicsReferenceStore.delete(_imageDb);
-    await _graphicsInfoStore.delete(_imageDb);
+      // Clear image/graphics data from image DB
+      await _graphicsReferenceStore.delete(_imageDb);
+      await _graphicsInfoStore.delete(_imageDb);
+    } catch (e, st) {
+      logger.w('Storage deleteAll failed: $e', error: e, stackTrace: st);
+    }
   }
 
   Future<void> delete(SaveDataType saveDataType) async {
-    final key = saveDataType.name;
-    await _saveDataStore.record(key).delete(_mainDb);
+    try {
+      final key = saveDataType.name;
+      await _saveDataStore.record(key).delete(_mainDb);
+    } catch (e, st) {
+      logger.w('Storage delete failed for $saveDataType: $e',
+          error: e, stackTrace: st);
+    }
   }
 
   Future<void> deleteImageData() async {
-    await _graphicsReferenceStore.delete(_imageDb);
-    await _graphicsInfoStore.delete(_imageDb);
+    try {
+      await _graphicsReferenceStore.delete(_imageDb);
+      await _graphicsInfoStore.delete(_imageDb);
+    } catch (e, st) {
+      logger.w('Storage deleteImageData failed: $e', error: e, stackTrace: st);
+    }
   }
 }
 
@@ -397,6 +423,7 @@ enum SaveDataType {
   textScale,
   logLevel,
   linkTraceEnabled,
+  logOverlayEnabled,
   monitoredDataServices,
   secondaryBaudRate,
   audioSampleRate,

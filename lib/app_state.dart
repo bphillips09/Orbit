@@ -50,12 +50,14 @@ class AppState extends ChangeNotifier {
   bool quitAuxWhenSuspended = true;
   bool switchToAuxOnFocusGain = true;
   bool autoConnectOnFocusGain = true;
+  bool restartPending = false;
   bool isScanActive = false;
   bool isTuneMixActive = false;
   ThemeMode themeMode = ThemeMode.dark;
   double textScale = 1.0;
   double uiScale = 720;
   Level logLevel = kDebugMode ? Level.debug : Level.info;
+  bool logOverlayEnabled = false;
   // Audio sample rate in Hz (configurable)
   int audioSampleRate = 48000;
   int secondaryBaudRate = 460800;
@@ -314,6 +316,11 @@ class AppState extends ChangeNotifier {
 
     linkTraceEnabled = await storageData.load(
       SaveDataType.linkTraceEnabled,
+      defaultValue: false,
+    );
+
+    logOverlayEnabled = await storageData.load(
+      SaveDataType.logOverlayEnabled,
       defaultValue: false,
     );
 
@@ -702,6 +709,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setRestartPending(bool value) {
+    if (restartPending == value) return;
+    restartPending = value;
+    notifyListeners();
+  }
+
   void updateSecondaryBaudRate(int baudRate) {
     secondaryBaudRate = baudRate;
     storageData.save(SaveDataType.secondaryBaudRate, secondaryBaudRate);
@@ -784,6 +797,12 @@ class AppState extends ChangeNotifier {
     try {
       FrameTracer.instance.setEnabled(enabled);
     } catch (_) {}
+    notifyListeners();
+  }
+
+  void updateLogOverlayEnabled(bool enabled) {
+    logOverlayEnabled = enabled;
+    storageData.save(SaveDataType.logOverlayEnabled, enabled);
     notifyListeners();
   }
 
@@ -1079,6 +1098,21 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _cancelUpdateTimers();
+    try {
+      playbackInfoNotifier.dispose();
+    } catch (_) {}
+    try {
+      playbackStateNotifier.dispose();
+    } catch (_) {}
+    try {
+      audioPresenceNotifier.dispose();
+    } catch (_) {}
+    try {
+      audioFocusNotifier.dispose();
+    } catch (_) {}
+    try {
+      favoriteOnAirNotifier.dispose();
+    } catch (_) {}
     super.dispose();
   }
 

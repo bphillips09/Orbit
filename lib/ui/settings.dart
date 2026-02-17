@@ -21,6 +21,7 @@ import 'package:orbit/main.dart';
 import 'package:orbit/storage/storage_data.dart';
 import 'package:orbit/ui/presets_editor.dart';
 import 'package:orbit/ui/favorites_manager.dart';
+import 'package:orbit/ui/log_viewer.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/signal_bar.dart';
 import 'package:orbit/ui/streaming_beta.dart';
@@ -32,7 +33,6 @@ import 'package:logger/logger.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_io/io.dart';
-import 'dart:convert';
 
 class SettingsPage extends StatelessWidget {
   final MainPageState mainPage;
@@ -351,6 +351,7 @@ class SettingsPage extends StatelessWidget {
                       final res = await HeadUnitAux.trySwitchToAux(
                         timeoutMs: 1500,
                       );
+
                       if (!res.opened) {
                         appState.updateUseNativeAuxInput(false);
                         if (context.mounted) {
@@ -551,14 +552,32 @@ class SettingsPage extends StatelessWidget {
                       Icons.report,
                       onTap: () => _showLogLevelDialog(context),
                     ),
-                    if (!kIsWeb) ...[
-                      _buildSettingTile(
-                        context,
-                        'View Log',
-                        'Open a scrollable log viewer',
-                        Icons.article_outlined,
-                        onTap: () => _showLogViewer(context),
-                      ),
+                    _buildSwitchTile(
+                      context,
+                      'Log Overlay',
+                      'Show a movable log panel on top of the app',
+                      Icons.picture_in_picture_alt_outlined,
+                      value: appState.logOverlayEnabled,
+                      onChanged: (value) {
+                        appState.updateLogOverlayEnabled(value);
+                        if (value && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Log overlay enabled. Tap the floating logs button to open it.'),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    _buildSettingTile(
+                      context,
+                      'View Log',
+                      'Search, copy, and follow live logs',
+                      Icons.article_outlined,
+                      onTap: () => _showLogViewer(context),
+                    ),
+                    if (!kIsWeb && !kIsWasm)
                       _buildSettingTile(
                         context,
                         'Open Log File',
@@ -566,7 +585,6 @@ class SettingsPage extends StatelessWidget {
                         Icons.description_outlined,
                         onTap: () => _openLogFile(),
                       ),
-                    ]
                   ],
                 ),
                 _buildSwitchTile(
@@ -838,54 +856,9 @@ class SettingsPage extends StatelessWidget {
   }
 
   void _showLogViewer(BuildContext context) async {
-    String content = '';
-    try {
-      await AppLogger.instance.ensureFileOutputReady();
-      final path = AppLogger.instance.logFilePath;
-      if (path != null) {
-        final file = File(path);
-        if (await file.exists()) {
-          // Read the last ~64KB to keep it snappy
-          final int length = await file.length();
-          final int start = length > 64 * 1024 ? (length - 64 * 1024) : 0;
-          content = await file.openRead(start).transform(utf8.decoder).join();
-        }
-      }
-    } catch (_) {
-      // Ignore
-    }
-
     if (!context.mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        final scrollController = ScrollController();
-        return AlertDialog(
-          title: const Text('Application Log'),
-          content: SizedBox(
-            width: 600,
-            height: 400,
-            child: Scrollbar(
-              controller: scrollController,
-              child: SingleChildScrollView(
-                controller: scrollController,
-                child: SelectableText(
-                  content.isEmpty ? 'No log content available.' : content,
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const LogViewerPage()),
     );
   }
 
@@ -2194,6 +2167,8 @@ class SettingsPage extends StatelessWidget {
       if (!context.mounted) return;
       if (!proceed) return;
 
+      appState.setRestartPending(true);
+
       await _runWithBlockingProgress(
         context,
         () async {
@@ -2206,14 +2181,29 @@ class SettingsPage extends StatelessWidget {
       );
 
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Imported config. Restarting...')),
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Restart required'),
+          content: const Text(
+            'Please restart Orbit to load the new configuration.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Ok'),
+            ),
+          ],
+        ),
       );
 
-      // Give the snackbar a beat to paint
-      await Future<void>.delayed(const Duration(milliseconds: 250));
+      if (!context.mounted) return;
       requestAppRestart();
     } catch (e) {
+      if (e.toString().contains('Restart requested')) {
+        return;
+      }
       if (!context.mounted) return;
       await showDialog<void>(
         context: context,

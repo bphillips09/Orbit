@@ -1,5 +1,6 @@
 // Logging class
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:logger/logger.dart';
@@ -21,13 +22,20 @@ class AppLogger {
   final String _fileExtension =
       defaultTargetPlatform == TargetPlatform.android ? '.txt' : '.log';
 
+  static const int _maxInMemoryLines = 2000;
+  final ListQueue<String> _inMemoryLines = ListQueue<String>();
+  final StreamController<List<String>> _lineStreamController =
+      StreamController<List<String>>.broadcast();
+
   Level get currentLevel => _currentLevel;
   String? get logFilePath => _logFile?.path;
+  Stream<List<String>> get lineStream => _lineStreamController.stream;
+  List<String> get recentLines => List<String>.unmodifiable(_inMemoryLines);
 
   // Initialize with console output only; file output will be attached later
   Future<void> init({Level? level}) async {
     _currentLevel = level ?? _currentLevel;
-    final outputs = <LogOutput>[ConsoleOutput()];
+    final outputs = <LogOutput>[ConsoleOutput(), _InMemoryOutput()];
     _output = MultiOutput(outputs);
 
     final consolePrinter = PrettyPrinter(
@@ -76,7 +84,11 @@ class AppLogger {
       _fileSink = _logFile!.openWrite(mode: FileMode.append);
 
       // Rebuild outputs to include file sink (writer handles rotation itself)
-      final outputs = <LogOutput>[ConsoleOutput(), _FileSinkOutput()];
+      final outputs = <LogOutput>[
+        ConsoleOutput(),
+        _InMemoryOutput(),
+        _FileSinkOutput(),
+      ];
       _output = MultiOutput(outputs);
       _logger = Logger(
         level: _currentLevel,
@@ -86,6 +98,21 @@ class AppLogger {
       );
     } catch (_) {
       // Ignore file init errors, console logging still works
+    }
+  }
+
+  void _addLinesToMemory(List<String> lines) {
+    if (lines.isEmpty) return;
+    for (final line in lines) {
+      _inMemoryLines.add(line);
+    }
+    while (_inMemoryLines.length > _maxInMemoryLines) {
+      _inMemoryLines.removeFirst();
+    }
+    try {
+      _lineStreamController.add(lines);
+    } catch (_) {
+      // Ignore stream failures
     }
   }
 
@@ -229,6 +256,9 @@ class AppLogger {
 
   // Flush and close the file sink
   Future<void> dispose() async {
+    try {
+      await _lineStreamController.close();
+    } catch (_) {}
     await _fileSink?.flush();
     await _fileSink?.close();
     _fileSink = null;
@@ -240,6 +270,14 @@ class _FileSinkOutput extends LogOutput {
   @override
   void output(OutputEvent event) {
     AppLogger.instance._writeLinesToFile(event.lines);
+  }
+}
+
+// In-memory output for viewers/overlays
+class _InMemoryOutput extends LogOutput {
+  @override
+  void output(OutputEvent event) {
+    AppLogger.instance._addLinesToMemory(event.lines);
   }
 }
 

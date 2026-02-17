@@ -40,6 +40,7 @@ import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/welcome_dialog.dart';
 import 'package:orbit/ui/connection_dialogs.dart';
 import 'package:orbit/platform/head_unit_aux.dart';
+import 'package:orbit/ui/log_overlay.dart';
 
 // Audio service handler
 AudioServiceHandler? audioServiceHandler;
@@ -165,7 +166,10 @@ class OrbitApp extends StatelessWidget {
 
               return MediaQuery(
                 data: next,
-                child: child ?? const SizedBox.shrink(),
+                child: LogOverlayHost(
+                  enabled: appState.logOverlayEnabled,
+                  child: child ?? const SizedBox.shrink(),
+                ),
               );
             },
             home: const MainPage(),
@@ -1123,12 +1127,28 @@ class MainPageState extends State<MainPage>
     }
   }
 
-  void _autoRetryConnectionOnResume() {
+  Future<void> _autoRetryConnectionOnResume() async {
     if (!mounted) return;
     if (_deviceConnected) return;
     if (!appState.autoConnectOnFocusGain) return;
     if (_startupInProgress) return;
     if (_userRequestedDisconnect) return;
+
+    try {
+      final String lastPort =
+          (await appState.storageData.load(SaveDataType.lastPort) ?? '')
+              .toString()
+              .trim();
+      if (lastPort.isEmpty) return;
+      final String? lastTransport =
+          (await appState.storageData.load(SaveDataType.lastPortTransport))
+              ?.toString()
+              .trim();
+      if (lastTransport == null || lastTransport.isEmpty) return;
+    } catch (_) {
+      // If storage isn't ready or load fails, skip auto-retry
+      return;
+    }
 
     final now = DateTime.now();
     final last = _lastAutoRetryAt;
@@ -1138,12 +1158,14 @@ class MainPageState extends State<MainPage>
     _lastAutoRetryAt = now;
 
     try {
+      if (!mounted) return;
       Navigator.of(context, rootNavigator: true).popUntil(
         (route) => route.settings.name != _connectionErrorDialogRoute,
       );
     } catch (_) {}
 
     try {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
     } catch (_) {}
     startupSequence();
