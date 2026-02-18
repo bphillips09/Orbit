@@ -23,6 +23,7 @@ import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/sxi_layer.dart';
 import 'package:orbit/ui/channel_info_dialog.dart';
+import 'package:orbit/ui/channel_logo_image.dart';
 import 'package:orbit/ui/preset.dart';
 import 'package:orbit/ui/settings.dart';
 import 'package:orbit/ui/slider_track.dart';
@@ -221,7 +222,7 @@ class MainPageState extends State<MainPage>
   bool initiatedPlayback = false;
   bool _audioServiceInitialized = false;
   String _connectionDetails = '';
-  Image? currentChannelImage;
+  Widget? currentChannelLogo;
   final serialHelper = SerialHelper();
   final channelTextController = TextEditingController();
   final FocusNode channelTextFocusNode = FocusNode();
@@ -1359,19 +1360,14 @@ class MainPageState extends State<MainPage>
     }
 
     if (playbackInfo.channelImage.isNotEmpty) {
-      try {
-        currentChannelImage = Image.memory(
-          playbackInfo.channelImage,
-          fit: BoxFit.contain,
-          filterQuality: FilterQuality.high,
-          gaplessPlayback: true,
-        );
-      } catch (e) {
-        logger.w('Error loading channel image: $e');
-        currentChannelImage = null;
-      }
+      currentChannelLogo = ChannelLogoImage(
+        bytes: playbackInfo.channelImage,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        gaplessPlayback: true,
+      );
     } else {
-      currentChannelImage = null;
+      currentChannelLogo = null;
     }
 
     updateTransport();
@@ -1899,14 +1895,14 @@ class MainPageState extends State<MainPage>
                                               },
                                             );
                                           },
-                                          child: currentChannelImage != null
+                                          child: currentChannelLogo != null
                                               ? ConstrainedBox(
                                                   constraints:
                                                       const BoxConstraints(
                                                     maxWidth: 400,
                                                     maxHeight: 60,
                                                   ),
-                                                  child: currentChannelImage!,
+                                                  child: currentChannelLogo!,
                                                 )
                                               : ConstrainedBox(
                                                   constraints:
@@ -2179,7 +2175,7 @@ class MainPageState extends State<MainPage>
                                     },
                                   );
                                 },
-                                child: currentChannelImage ??
+                                child: currentChannelLogo ??
                                     Text(
                                       appState.nowPlaying.channelName,
                                       textAlign: TextAlign.center,

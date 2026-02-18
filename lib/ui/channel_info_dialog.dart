@@ -7,6 +7,7 @@ import 'package:orbit/device_layer.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/ui/album_art.dart';
+import 'package:orbit/ui/channel_logo_image.dart';
 import 'package:orbit/logging.dart';
 import 'package:orbit/helpers.dart';
 
@@ -174,11 +175,12 @@ class _ChannelInfoDialogState extends State<ChannelInfoDialog> {
                           alignment: Alignment.centerRight,
                           child: FittedBox(
                             fit: BoxFit.contain,
-                            child: Image.memory(
-                              filterQuality: FilterQuality.medium,
-                              Uint8List.fromList(channelLogoBytes),
-                              gaplessPlayback: true,
-                            ),
+                              child: ChannelLogoImage(
+                                bytes: Uint8List.fromList(channelLogoBytes),
+                                fit: BoxFit.contain,
+                                filterQuality: FilterQuality.medium,
+                                gaplessPlayback: true,
+                              ),
                           ),
                         ),
                       ),
@@ -299,10 +301,10 @@ class _ChannelInfoDialogState extends State<ChannelInfoDialog> {
                             ),
                       avatar: logo.isNotEmpty
                           ? SizedBox(
-                              child: Image.memory(
-                                Uint8List.fromList(logo),
-                                filterQuality: FilterQuality.medium,
+                              child: ChannelLogoImage(
+                                bytes: Uint8List.fromList(logo),
                                 fit: BoxFit.contain,
+                                filterQuality: FilterQuality.medium,
                                 gaplessPlayback: true,
                               ),
                             )

@@ -2,6 +2,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:orbit/ui/album_art.dart';
+import 'package:orbit/ui/channel_logo_image.dart';
 
 class ChannelListEntry extends StatelessWidget {
   final bool isNowPlaying;
@@ -88,15 +89,13 @@ class ChannelListEntry extends StatelessWidget {
                             SizedBox(
                               height: 30,
                               width: 60,
-                              child: Image.memory(
-                                channelLogo!,
+                              child: ChannelLogoImage(
+                                bytes: channelLogo!,
                                 cacheHeight: 128,
                                 fit: BoxFit.contain,
                                 gaplessPlayback: true,
                                 filterQuality: FilterQuality.medium,
-                                errorBuilder: (_, __, ___) {
-                                  return _buildChannelName(context);
-                                },
+                                fallbackBuilder: _buildChannelName,
                               ),
                             ),
                         ],
@@ -117,15 +116,13 @@ class ChannelListEntry extends StatelessWidget {
                             SizedBox(
                               height: 30,
                               width: 80,
-                              child: Image.memory(
-                                channelLogo!,
+                              child: ChannelLogoImage(
+                                bytes: channelLogo!,
                                 cacheHeight: 128,
                                 fit: BoxFit.contain,
                                 gaplessPlayback: true,
                                 filterQuality: FilterQuality.medium,
-                                errorBuilder: (_, __, ___) {
-                                  return _buildChannelName(context);
-                                },
+                                fallbackBuilder: _buildChannelName,
                               ),
                             ),
                         ],

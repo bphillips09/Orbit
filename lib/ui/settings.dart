@@ -26,6 +26,7 @@ import 'package:orbit/ui/log_viewer.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/signal_bar.dart';
 import 'package:orbit/ui/streaming_beta.dart';
+import 'package:orbit/ui/channel_logo_image.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/sxi_indication_types.dart';
@@ -2923,22 +2924,20 @@ class SettingsPage extends StatelessWidget {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(3),
-                      child: Image.memory(
-                        Uint8List.fromList(list[index].value.imageData),
+                      child: ChannelLogoImage(
+                        bytes: Uint8List.fromList(list[index].value.imageData),
                         cacheHeight: 160,
                         cacheWidth: 160,
                         fit: BoxFit.scaleDown,
                         gaplessPlayback: true,
                         filterQuality: FilterQuality.medium,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Center(
-                            child: Icon(
-                              Icons.broken_image,
-                              color: Colors.grey,
-                              size: 32,
-                            ),
-                          );
-                        },
+                        fallbackBuilder: (_) => const Center(
+                          child: Icon(
+                            Icons.broken_image,
+                            color: Colors.grey,
+                            size: 32,
+                          ),
+                        ),
                       ),
                     ),
                   ),

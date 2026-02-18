@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:orbit/app_state.dart';
 import 'package:orbit/main.dart';
 import 'package:orbit/ui/preset.dart';
+import 'package:orbit/ui/channel_logo_image.dart';
 
 class PresetsEditorDialog extends StatefulWidget {
   final AppState appState;
@@ -217,15 +218,12 @@ class _PresetsEditorDialogState extends State<PresetsEditorDialog> {
                             SizedBox(
                               width: 56,
                               height: 36,
-                              child: Image.memory(
-                                logoBytes,
+                              child: ChannelLogoImage(
+                                bytes: logoBytes,
                                 cacheHeight: 128,
                                 fit: BoxFit.contain,
                                 gaplessPlayback: true,
                                 filterQuality: FilterQuality.medium,
-                                errorBuilder: (_, __, ___) {
-                                  return const SizedBox.shrink();
-                                },
                               ),
                             ),
                           if (logoBytes != null && !isEmpty)

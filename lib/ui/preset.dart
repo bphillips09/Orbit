@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:orbit/app_state.dart';
 import 'package:orbit/helpers.dart';
+import 'package:orbit/ui/channel_logo_image.dart';
 import 'package:provider/provider.dart';
 
 class Preset {
@@ -547,8 +548,8 @@ class PresetCarouselState extends State<PresetCarousel> {
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
             child: Center(
               child: hasLogo
-                  ? Image.memory(
-                      logoBytes,
+                  ? ChannelLogoImage(
+                      bytes: logoBytes,
                       cacheHeight: 120,
                       height: logoHeight,
                       fit: BoxFit.fitWidth,
@@ -621,8 +622,8 @@ class PresetCarouselState extends State<PresetCarousel> {
               height: graphicAreaHeight,
               child: Center(
                 child: hasLogo
-                    ? Image.memory(
-                        logoBytes,
+                    ? ChannelLogoImage(
+                        bytes: logoBytes,
                         cacheHeight: 100,
                         height: graphicAreaHeight,
                         fit: BoxFit.fitWidth,

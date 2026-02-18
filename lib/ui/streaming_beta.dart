@@ -11,6 +11,7 @@ import 'package:orbit/logging.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/sxi_indications.dart';
 import 'package:orbit/storage/storage_data.dart';
+import 'package:orbit/ui/channel_logo_image.dart';
 
 class StreamingBetaPage extends StatefulWidget {
   final DeviceLayer deviceLayer;
@@ -2834,12 +2835,14 @@ class _StreamingBetaPageState extends State<StreamingBetaPage> {
                             width: 80,
                             child: logoBytes == null
                                 ? _buildChannelLogoPlaceholder(ch)
-                                : Image.memory(
-                                    logoBytes,
+                                : ChannelLogoImage(
+                                    bytes: logoBytes,
                                     cacheHeight: 128,
                                     fit: BoxFit.contain,
                                     gaplessPlayback: true,
                                     filterQuality: FilterQuality.medium,
+                                    fallbackBuilder: (_) =>
+                                        _buildChannelLogoPlaceholder(ch),
                                   ),
                           ),
                           title: Text('Channel ${ch.channelNumber}'),
