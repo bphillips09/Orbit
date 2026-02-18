@@ -41,7 +41,7 @@ class AppState extends ChangeNotifier {
   bool debugMode = false;
   bool analyticsDisabled = false;
   bool smallScreenMode = false;
-  bool ignoreSafeArea = false;
+  double safeAreaInsetScale = 1.0;
   // Android-only: preferred audio output route
   String androidAudioOutputRoute = 'Speaker';
   bool detectAudioInterruptions = true;
@@ -379,10 +379,27 @@ class AppState extends ChangeNotifier {
       defaultValue: false,
     );
 
-    ignoreSafeArea = await storageData.load(
-      SaveDataType.ignoreSafeArea,
-      defaultValue: false,
+    // Safe-area scale
+    final dynamic rawSafeAreaScale = await storageData.load(
+      SaveDataType.safeAreaInsetScale,
+      defaultValue: null,
     );
+
+    double? parsedSafeAreaScale;
+
+    if (rawSafeAreaScale is num) {
+      parsedSafeAreaScale = rawSafeAreaScale.toDouble();
+    } else if (rawSafeAreaScale is String) {
+      parsedSafeAreaScale = double.tryParse(rawSafeAreaScale);
+    }
+
+    if (parsedSafeAreaScale == null) {
+      safeAreaInsetScale = 1.0;
+      await storageData.save(
+          SaveDataType.safeAreaInsetScale, safeAreaInsetScale);
+    }
+
+    safeAreaInsetScale = safeAreaInsetScale.clamp(0.0, 2.0).toDouble();
 
     if (smallScreenMode) {
       const double desiredTextScale = 1.8;
@@ -663,9 +680,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateIgnoreSafeArea(bool value) {
-    ignoreSafeArea = value;
-    storageData.save(SaveDataType.ignoreSafeArea, value);
+  void updateSafeAreaInsetScale(double value) {
+    safeAreaInsetScale = value.clamp(0.0, 2.0).toDouble();
+    storageData.save(SaveDataType.safeAreaInsetScale, safeAreaInsetScale);
     notifyListeners();
   }
 

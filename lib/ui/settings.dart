@@ -199,16 +199,8 @@ class SettingsPage extends StatelessWidget {
                     appState.updateSmallScreenMode(value);
                   },
                 ),
-                _buildSwitchTile(
-                  context,
-                  'Ignore Safe Area',
-                  'Draw UI outside the safe area',
-                  Icons.fullscreen,
-                  value: appState.ignoreSafeArea,
-                  onChanged: (value) {
-                    appState.updateIgnoreSafeArea(value);
-                  },
-                ),
+                const SizedBox(height: 8),
+                _buildSafeAreaInsetSelector(context, appState),
               ],
             ),
             const SizedBox(height: sectionSpacing),
@@ -2671,6 +2663,65 @@ class SettingsPage extends StatelessWidget {
                 _buildDesignHeightPresetButton(
                     context, 'Large', 1080, appState),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSafeAreaInsetSelector(BuildContext context, AppState appState) {
+    final theme = Theme.of(context);
+    final double scale = appState.safeAreaInsetScale.clamp(0.0, 2.0).toDouble();
+    final EdgeInsets insets = MediaQuery.of(context).padding;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Safe Area Padding',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w500,
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '100% matches the device safe area',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.75),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Slider(
+                  value: scale,
+                  min: 0.0,
+                  max: 2.0,
+                  divisions: 40,
+                  label: '${(scale * 100).round()}%',
+                  onChanged: (value) =>
+                      appState.updateSafeAreaInsetScale(value),
+                ),
+              ),
+              SizedBox(
+                width: 72,
+                child: Text(
+                  '${(scale * 100).round()}%',
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+            ],
+          ),
+          Text(
+            'Current insets: Top ${insets.top.toStringAsFixed(0)}px, Bottom ${insets.bottom.toStringAsFixed(0)}px',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.75),
             ),
           ),
         ],

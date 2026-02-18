@@ -212,7 +212,7 @@ class StorageData {
         case SaveDataType.switchToAuxOnFocusGain:
         case SaveDataType.autoConnectOnFocusGain:
         case SaveDataType.smallScreenMode:
-        case SaveDataType.ignoreSafeArea:
+        case SaveDataType.safeAreaInsetScale:
           record[key] = value;
           break;
       }
@@ -280,7 +280,7 @@ class StorageData {
         case SaveDataType.switchToAuxOnFocusGain:
         case SaveDataType.autoConnectOnFocusGain:
         case SaveDataType.smallScreenMode:
-        case SaveDataType.ignoreSafeArea:
+        case SaveDataType.safeAreaInsetScale:
           return record[key];
       }
     } catch (e, st) {
@@ -437,5 +437,5 @@ enum SaveDataType {
   switchToAuxOnFocusGain,
   autoConnectOnFocusGain,
   smallScreenMode,
-  ignoreSafeArea
+  safeAreaInsetScale,
 }

@@ -156,13 +156,16 @@ class OrbitApp extends StatelessWidget {
                 devicePixelRatio: mq.devicePixelRatio * effectiveScale,
               );
 
-              final MediaQueryData next = appState.ignoreSafeArea
-                  ? scaled.copyWith(
-                      padding: EdgeInsets.zero,
-                      viewPadding: EdgeInsets.zero,
-                      systemGestureInsets: EdgeInsets.zero,
-                    )
-                  : scaled;
+              final double safeAreaScale =
+                  appState.safeAreaInsetScale.clamp(0.0, 2.0).toDouble();
+              final MediaQueryData next = safeAreaScale == 1.0
+                  ? scaled
+                  : scaled.copyWith(
+                      padding: scaled.padding * safeAreaScale,
+                      viewPadding: scaled.viewPadding * safeAreaScale,
+                      systemGestureInsets:
+                          scaled.systemGestureInsets * safeAreaScale,
+                    );
 
               return MediaQuery(
                 data: next,
