@@ -328,6 +328,148 @@ class AudioController {
     _isPlayingTone = false;
   }
 
+  // Play a short notification tone
+  Future<void> playNotificationTone({double frequencyHz = 620.0}) async {
+    if (_isPlayingNotificationTone) return;
+
+    const double durationSeconds = 0.2;
+    const int channelsCount = 2;
+    const double amplitude = 0.25;
+    final double freq = frequencyHz.clamp(20.0, 20000.0).toDouble();
+
+    final int sr = (sampleRate > 0 ? sampleRate : 48000);
+
+    // Request a transient sonification focus
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(
+        true,
+        androidWillPauseWhenDucked: false,
+        androidAudioFocusGainType:
+            AndroidAudioFocusGainType.gainTransientMayDuck,
+        androidAudioAttributes: const AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.sonification,
+          usage: AndroidAudioUsage.assistanceSonification,
+          flags: AndroidAudioFlags.audibilityEnforced,
+        ),
+      );
+    } catch (_) {}
+
+    final bool didInitOutput = !_audioStreamInitialized;
+    if (didInitOutput) {
+      _audioStream.init(
+        waitingBufferMilliSec: 0,
+        bufferMilliSec: 1000,
+        sampleRate: sr,
+        channels: channelsCount,
+      );
+      _audioStreamInitialized = true;
+    }
+
+    // Resume the audio stream on web
+    _audioStream.resume();
+
+    final int totalFrames = (sr * durationSeconds).round();
+    final int attackFrames = math.max(1, (sr * 0.01).round()); // 10ms
+    final int releaseFrames = math.max(1, (sr * 0.05).round()); // 50ms
+    final double twoPi = 2 * math.pi;
+    double phase = 0;
+
+    final Float32List toneBuffer = Float32List(totalFrames * channelsCount);
+    int toneWriteIndex = 0;
+    for (int frame = 0; frame < totalFrames; frame++) {
+      final double phaseIncrement = twoPi * freq / sr;
+
+      double env = 1.0;
+      if (frame < attackFrames) {
+        env = frame / attackFrames;
+      } else {
+        final int remaining = totalFrames - frame;
+        if (remaining < releaseFrames) {
+          env = remaining / releaseFrames;
+        }
+      }
+
+      final double sample = math.sin(phase) * amplitude * env;
+      phase += phaseIncrement;
+      if (phase >= twoPi) phase -= twoPi;
+
+      toneBuffer[toneWriteIndex++] = sample;
+      toneBuffer[toneWriteIndex++] = sample;
+    }
+
+    // If we're already pushing live audio into the output stream, mix it in
+    bool canMixIntoLive = false;
+    if (_recordStreamStarted) {
+      final rec = _recorder;
+      if (rec == null) {
+        canMixIntoLive = true;
+      } else {
+        try {
+          final bool isRec = await rec.isRecording();
+          final bool isPaused = await rec.isPaused();
+          canMixIntoLive = isRec && !isPaused;
+        } catch (_) {
+          // If we can't query state, assume mixing is OK
+          canMixIntoLive = true;
+        }
+      }
+    }
+
+    if (canMixIntoLive) {
+      _armNotificationToneMix(toneBuffer);
+      return;
+    }
+
+    _isPlayingNotificationTone = true;
+    try {
+      // Generate fixed-size PCM buffers and push them
+      final int chunkFrames = math.max(1, (sr / 50).round());
+
+      Future<void> pushWithBackpressure(Float32List buf) async {
+        const int maxWaitMs = 500;
+        int waitedMs = 0;
+        while (true) {
+          final int res = _audioStream.push(buf);
+          if (res == 0) return;
+          if (waitedMs >= maxWaitMs) return;
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+          waitedMs += 5;
+        }
+      }
+
+      int frameIndex = 0;
+      while (frameIndex < totalFrames) {
+        final int framesThisChunk =
+            math.min(chunkFrames, totalFrames - frameIndex);
+        final int sampleOffset = frameIndex * channelsCount;
+        final int sampleCount = framesThisChunk * channelsCount;
+        final Float32List chunk = Float32List(sampleCount);
+        chunk.setRange(0, sampleCount, toneBuffer, sampleOffset);
+        await pushWithBackpressure(chunk);
+        frameIndex += framesThisChunk;
+      }
+    } finally {
+      _isPlayingNotificationTone = false;
+    }
+
+    // If we had to spin up the output just for this tone, tear it back down after allowing playback time
+    if (didInitOutput && !_isStarted && !_recordStreamStarted) {
+      try {
+        await Future<void>.delayed(
+          Duration(milliseconds: (durationSeconds * 1000).ceil() + 100),
+        );
+      } catch (_) {}
+
+      if (!_isStarted && !_recordStreamStarted) {
+        try {
+          _audioStream.uninit();
+        } catch (_) {}
+        _audioStreamInitialized = false;
+      }
+    }
+  }
+
   // Runs audio capture on Android using the Record plugin on main isolate
   Future<void> _runAudioInputNonIsolate(
       {dynamic selectedDevice, int? effectiveSampleRate}) async {
@@ -379,7 +521,9 @@ class AudioController {
     } catch (_) {}
     _recordStreamSub = recordStream.listen((stream) {
       if (_isPlayingTone) return;
-      _audioStream.push(_convertUint8ListToFloat32List(stream));
+      final out = _convertUint8ListToFloat32List(stream);
+      _mixNotificationToneInPlace(out);
+      _audioStream.push(out);
     }, onError: (Object e, StackTrace st) {
       logger.e('Audio record stream error: $e\n$st');
     });
@@ -390,9 +534,10 @@ class AudioController {
     int len = data.lengthInBytes ~/ 2;
     Float32List float32List = Float32List(len);
     ByteData byteData = ByteData.sublistView(data);
+    final double gain = _isDucked ? _duckGain : 1.0;
     for (int i = 0; i < len; i++) {
       int val = byteData.getInt16(i * 2, Endian.little);
-      float32List[i] = val / 32768.0;
+      float32List[i] = (val / 32768.0) * gain;
     }
     return float32List;
   }

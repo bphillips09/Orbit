@@ -1377,6 +1377,10 @@ class MainPageState extends State<MainPage>
       if (!matchesChannel) return;
 
       _lastOnAirPromptAt = DateTime.now();
+      if (appState.playFavoritesNotification &&
+          appState.showOnAirFavoritesPrompt) {
+        unawaited(audioController.playNotificationTone());
+      }
       setState(() {});
 
       // Schedule hide after 20 seconds unless a newer event arrives

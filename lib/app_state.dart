@@ -37,6 +37,7 @@ class AppState extends ChangeNotifier {
   bool tuneStart = false;
   bool sliderSnapping = true;
   bool showOnAirFavoritesPrompt = true;
+  bool playFavoritesNotification = false;
   bool welcomeSeen = false;
   bool debugMode = false;
   bool analyticsDisabled = false;
@@ -295,6 +296,10 @@ class AppState extends ChangeNotifier {
       SaveDataType.showOnAirFavoritesPrompt,
       defaultValue: true,
     );
+    playFavoritesNotification = await storageData.load(
+      SaveDataType.playFavoritesNotification,
+      defaultValue: false,
+    );
     debugMode = await storageData.load(
       SaveDataType.debugMode,
       defaultValue: kDebugMode,
@@ -394,10 +399,12 @@ class AppState extends ChangeNotifier {
       parsedSafeAreaScale = double.tryParse(rawSafeAreaScale);
     }
 
-    if (parsedSafeAreaScale == null) {
+    if (parsedSafeAreaScale == null || !parsedSafeAreaScale.isFinite) {
       safeAreaInsetScale = 1.0;
       await storageData.save(
           SaveDataType.safeAreaInsetScale, safeAreaInsetScale);
+    } else {
+      safeAreaInsetScale = parsedSafeAreaScale;
     }
 
     safeAreaInsetScale = safeAreaInsetScale.clamp(0.0, 2.0).toDouble();
@@ -626,6 +633,12 @@ class AppState extends ChangeNotifier {
   void updateShowOnAirFavoritesPrompt(bool enabled) {
     showOnAirFavoritesPrompt = enabled;
     storageData.save(SaveDataType.showOnAirFavoritesPrompt, enabled);
+    notifyListeners();
+  }
+
+  void updatePlayOnAirFavoritesNotificationTone(bool enabled) {
+    playFavoritesNotification = enabled;
+    storageData.save(SaveDataType.playFavoritesNotification, enabled);
     notifyListeners();
   }
 

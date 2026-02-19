@@ -1,4 +1,5 @@
 // Settings Page
+import 'dart:async';
 import 'dart:math';
 import 'package:audio_session/audio_session.dart';
 import 'package:android_intent_plus/android_intent.dart';
@@ -153,6 +154,23 @@ class SettingsPage extends StatelessWidget {
                     appState.updateShowOnAirFavoritesPrompt(value);
                   },
                 ),
+                if (appState.showOnAirFavoritesPrompt)
+                  _buildSwitchTile(
+                    context,
+                    'Play On-Air Favorites Notification Tone',
+                    'Play a short tone when a favorite goes on-air',
+                    Icons.notifications_active_outlined,
+                    value: appState.playFavoritesNotification,
+                    onChanged: (value) {
+                      appState.updatePlayOnAirFavoritesNotificationTone(value);
+                      if (value) {
+                        unawaited(
+                          mainPage.audioController
+                              .ensureWebAudioResumedFromGesture(),
+                        );
+                      }
+                    },
+                  ),
                 _buildSwitchTile(
                   context,
                   'Restart Song on Tune',
@@ -375,8 +393,8 @@ class SettingsPage extends StatelessWidget {
                         final session = await AudioSession.instance;
                         final ok = await session.setActive(
                           true,
-                          androidWillPauseWhenDucked:
-                              appState.detectAudioInterruptions,
+                          // Allow ducking
+                          androidWillPauseWhenDucked: false,
                         );
                         appState.updateHasAudioFocus(ok);
                       } catch (_) {}
@@ -678,6 +696,16 @@ class SettingsPage extends StatelessWidget {
                     Icons.volume_up,
                     onTap: () {
                       mainPage.audioController.playTestTone(440, 3);
+                    },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Play Notification Tone (software)',
+                    'Software-generated 620 Hz',
+                    Icons.notifications_active_outlined,
+                    onTap: () async {
+                      await mainPage.audioController
+                          .playNotificationTone(frequencyHz: 620.0);
                     },
                   ),
                   _buildSettingTile(

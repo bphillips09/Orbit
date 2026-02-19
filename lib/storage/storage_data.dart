@@ -192,6 +192,7 @@ class StorageData {
         case SaveDataType.tuneStart:
         case SaveDataType.sliderSnapping:
         case SaveDataType.showOnAirFavoritesPrompt:
+        case SaveDataType.playFavoritesNotification:
         case SaveDataType.welcomeSeen:
         case SaveDataType.debugMode:
         case SaveDataType.themeMode:
@@ -261,6 +262,7 @@ class StorageData {
         case SaveDataType.tuneStart:
         case SaveDataType.sliderSnapping:
         case SaveDataType.showOnAirFavoritesPrompt:
+        case SaveDataType.playFavoritesNotification:
         case SaveDataType.welcomeSeen:
         case SaveDataType.debugMode:
         case SaveDataType.themeMode:
@@ -419,6 +421,7 @@ enum SaveDataType {
   tuneStart,
   sliderSnapping,
   showOnAirFavoritesPrompt,
+  playFavoritesNotification,
   welcomeSeen,
   debugMode,
   themeMode,
