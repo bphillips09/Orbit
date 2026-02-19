@@ -35,9 +35,58 @@ Future<void> checkForAppUpdates(
     if (rawTag.isEmpty) return;
 
     final latestVersion = Version.parse(rawTag.replaceAll('v', ''));
-    final String downloadUrl = (data['html_url'] ?? '').toString();
+    final String releaseUrl = (data['html_url'] ?? '').toString();
+    final String releaseNotes = (data['body'] ?? '').toString();
+    final String releaseName = (data['name'] ?? '').toString();
 
-    if (latestVersion > currentVersion && downloadUrl.isNotEmpty) {
+    Future<void> showReleaseNotesDialog(BuildContext dialogContext) async {
+      final String notes = releaseNotes.trim().isEmpty
+          ? 'No release notes were provided.'
+          : releaseNotes.trim();
+
+      await showDialog<void>(
+        context: dialogContext,
+        builder: (BuildContext notesDialogContext) {
+          return AlertDialog(
+            title: Text(
+              releaseName.trim().isEmpty
+                  ? 'Release notes: v${latestVersion.toString()}'
+                  : 'Release notes: ${releaseName.trim()}',
+            ),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 700, maxHeight: 420),
+              child: SingleChildScrollView(
+                child: SelectableText(notes),
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(notesDialogContext).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      );
+    }
+
+    Future<void> openReleasePage() async {
+      if (releaseUrl.isEmpty) return;
+      final uri = Uri.parse(releaseUrl);
+      if (!await canLaunchUrl(uri)) {
+        logger.w('Unable to launch release url: $releaseUrl');
+        return;
+      }
+
+      await launchUrl(
+        uri,
+        mode: kIsWeb
+            ? LaunchMode.platformDefault
+            : LaunchMode.externalApplication,
+      );
+    }
+
+    if (latestVersion > currentVersion && releaseUrl.isNotEmpty) {
       if (!context.mounted) return;
       await showDialog<void>(
         context: context,
@@ -49,6 +98,10 @@ Future<void> checkForAppUpdates(
               'v${currentVersion.toString()} → v${latestVersion.toString()}',
             ),
             actions: <Widget>[
+              TextButton(
+                child: const Text('Release notes'),
+                onPressed: () => showReleaseNotesDialog(dialogContext),
+              ),
               TextButton(
                 child: const Text('No'),
                 onPressed: () => Navigator.of(dialogContext).pop(),
@@ -62,11 +115,7 @@ Future<void> checkForAppUpdates(
                     return;
                   } else {
                     Navigator.of(dialogContext).pop();
-                    final uri = Uri.parse(downloadUrl);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri,
-                          mode: LaunchMode.externalApplication);
-                    }
+                    await openReleasePage();
                   }
                 },
               ),
