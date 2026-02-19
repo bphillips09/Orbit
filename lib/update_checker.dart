@@ -87,6 +87,8 @@ Future<void> checkForAppUpdates(
     }
 
     if (latestVersion > currentVersion && releaseUrl.isNotEmpty) {
+      logger.i(
+          'Update available. v${currentVersion.toString()} < v${latestVersion.toString()}');
       if (!context.mounted) return;
       await showDialog<void>(
         context: context,
@@ -123,6 +125,9 @@ Future<void> checkForAppUpdates(
           );
         },
       );
+    } else {
+      logger.i(
+          'No update available. v${currentVersion.toString()} >= v${latestVersion.toString()}');
     }
   } catch (e, st) {
     logger.e('Error checking for updates', error: e, stackTrace: st);
