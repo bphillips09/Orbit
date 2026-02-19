@@ -127,6 +127,7 @@ local.properties
 **/Pods/
 **/macos/Flutter/GeneratedPluginRegistrant.swift
 **/macos/Flutter/ephemeral
+**/macos/**/DerivedData/
 **/xcuserdata/
 
 # Windows
