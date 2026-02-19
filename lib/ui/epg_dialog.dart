@@ -490,16 +490,23 @@ class EpgDialogHelper {
     return await showDialog<int>(
           barrierDismissible: true,
           context: context,
-          builder: (BuildContext context) => EpgDialog(
-            appState: appState,
-            sxiLayer: sxiLayer,
-            deviceLayer: deviceLayer,
-            initialCategory: initialCategory,
-            mainScrollController: mainScrollController,
-            mainListController: mainListController,
-            categoryScrollController: categoryScrollController,
-            categoryListController: categoryListController,
-          ),
+          builder: (BuildContext dialogContext) {
+            // Ignore on-screen keyboard for now
+            final mq = MediaQuery.of(dialogContext);
+            return MediaQuery(
+              data: mq.copyWith(viewInsets: EdgeInsets.zero),
+              child: EpgDialog(
+                appState: appState,
+                sxiLayer: sxiLayer,
+                deviceLayer: deviceLayer,
+                initialCategory: initialCategory,
+                mainScrollController: mainScrollController,
+                mainListController: mainListController,
+                categoryScrollController: categoryScrollController,
+                categoryListController: categoryListController,
+              ),
+            );
+          },
         ) ??
         0;
   }
