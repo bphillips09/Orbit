@@ -27,6 +27,16 @@ class AudioServiceHandler extends BaseAudioHandler
   Directory? cacheDir;
   AppPlaybackState? _lastPlaybackState;
 
+  MediaKeyBehavior _effectiveMediaKeyBehaviorForScanMix() {
+    final base = appState.mediaKeyBehavior;
+    if (base == MediaKeyBehavior.track) return base;
+    if (!appState.mediaKeysControlTrackWhenScanMixActive) return base;
+    if (appState.isScanActive || appState.isTuneMixActive) {
+      return MediaKeyBehavior.track;
+    }
+    return base;
+  }
+
   @override
   Future<void> play() async {
     logger.d('---> PLAY');
@@ -51,13 +61,12 @@ class AudioServiceHandler extends BaseAudioHandler
   @override
   Future<void> skipToPrevious() async {
     logger.d('---> PREV |<');
-    switch (appState.mediaKeyBehavior) {
+    switch (_effectiveMediaKeyBehaviorForScanMix()) {
       case MediaKeyBehavior.channel:
-        final ch =
-            nowPlaying?.channelNumber ?? appState.nowPlaying.channelNumber;
+        int ch = nowPlaying?.channelNumber ?? appState.nowPlaying.channelNumber;
         if (ch <= 0) {
-          logger.w('Skip previous ignored: current channel unknown');
-          return;
+          logger.w('Current channel unknown');
+          ch = 0;
         }
         deviceLayer.sendControlCommand(SXiSelectChannelCommand(
             ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
@@ -78,13 +87,12 @@ class AudioServiceHandler extends BaseAudioHandler
   @override
   Future<void> skipToNext() async {
     logger.d('---> NEXT >|');
-    switch (appState.mediaKeyBehavior) {
+    switch (_effectiveMediaKeyBehaviorForScanMix()) {
       case MediaKeyBehavior.channel:
-        final ch =
-            nowPlaying?.channelNumber ?? appState.nowPlaying.channelNumber;
+        int ch = nowPlaying?.channelNumber ?? appState.nowPlaying.channelNumber;
         if (ch <= 0) {
-          logger.w('Skip next ignored: current channel unknown');
-          return;
+          logger.w('Current channel unknown');
+          ch = 0;
         }
         deviceLayer.sendControlCommand(SXiSelectChannelCommand(
             ChanSelectionType.tuneToNextHigherChannelNumberInCategory,

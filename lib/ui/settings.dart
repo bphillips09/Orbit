@@ -177,6 +177,18 @@ class SettingsPage extends StatelessWidget {
                   },
                 ),
                 _buildMediaKeyBehaviorSelector(context, appState),
+                if (appState.mediaKeyBehavior != MediaKeyBehavior.track)
+                  _buildSwitchTile(
+                    context,
+                    'Media Keys Control Track When Scan/Mix Active',
+                    'When Scan or TuneMix is active, use track back/forward for media keys',
+                    Icons.music_note,
+                    value: appState.mediaKeysControlTrackWhenScanMixActive,
+                    onChanged: (value) {
+                      appState
+                          .updateMediaKeysControlTrackWhenScanMixActive(value);
+                    },
+                  ),
               ],
             ),
             const SizedBox(height: sectionSpacing),

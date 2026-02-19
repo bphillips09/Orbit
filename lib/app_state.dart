@@ -63,6 +63,7 @@ class AppState extends ChangeNotifier {
   int secondaryBaudRate = 460800;
   // What hardware/media skip keys should control
   MediaKeyBehavior mediaKeyBehavior = MediaKeyBehavior.channel;
+  bool mediaKeysControlTrackWhenScanMixActive = true;
   int _lastSid = 0;
   bool linkTraceEnabled = false;
   final Set<DataServiceIdentifier> monitoredDataServices =
@@ -476,8 +477,14 @@ class AppState extends ChangeNotifier {
       SaveDataType.mediaKeyBehavior,
       defaultValue: MediaKeyBehavior.channel.index,
     );
+
     mediaKeyBehavior = MediaKeyBehavior.values[
         mediaKeyBehaviorIndex.clamp(0, MediaKeyBehavior.values.length - 1)];
+
+    mediaKeysControlTrackWhenScanMixActive = await storageData.load(
+      SaveDataType.mediaKeysTrackDuringScanMix,
+      defaultValue: true,
+    );
 
     notifyListeners();
   }
@@ -751,6 +758,12 @@ class AppState extends ChangeNotifier {
   void updateMediaKeyBehavior(MediaKeyBehavior behavior) {
     mediaKeyBehavior = behavior;
     storageData.save(SaveDataType.mediaKeyBehavior, behavior.index);
+    notifyListeners();
+  }
+
+  void updateMediaKeysControlTrackWhenScanMixActive(bool value) {
+    mediaKeysControlTrackWhenScanMixActive = value;
+    storageData.save(SaveDataType.mediaKeysTrackDuringScanMix, value);
     notifyListeners();
   }
 

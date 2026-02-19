@@ -203,6 +203,7 @@ class StorageData {
         case SaveDataType.secondaryBaudRate:
         case SaveDataType.audioSampleRate:
         case SaveDataType.mediaKeyBehavior:
+        case SaveDataType.mediaKeysTrackDuringScanMix:
         case SaveDataType.interfaceScale:
         case SaveDataType.analyticsDisabled:
         case SaveDataType.detectAudioInterruptions:
@@ -271,6 +272,7 @@ class StorageData {
         case SaveDataType.secondaryBaudRate:
         case SaveDataType.audioSampleRate:
         case SaveDataType.mediaKeyBehavior:
+        case SaveDataType.mediaKeysTrackDuringScanMix:
         case SaveDataType.interfaceScale:
         case SaveDataType.analyticsDisabled:
         case SaveDataType.detectAudioInterruptions:
@@ -428,6 +430,7 @@ enum SaveDataType {
   secondaryBaudRate,
   audioSampleRate,
   mediaKeyBehavior,
+  mediaKeysTrackDuringScanMix,
   interfaceScale,
   analyticsDisabled,
   detectAudioInterruptions,
