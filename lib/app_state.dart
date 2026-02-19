@@ -239,14 +239,14 @@ class AppState extends ChangeNotifier {
       AppLogger.instance.setLevel(parsedLevel);
     } catch (_) {}
 
-    // Load EQ (defaults: Vol=-15, Gain=-5)
+    // Load EQ (defaults: Vol=-5, Gain=-5)
     // The device boots at 0 Vol and 0 Gain which is way too loud
     final Int8List? loadedEq = await storageData.load(
       SaveDataType.eq,
       defaultValue: null,
     );
     final Int8List eqValues = loadedEq ??
-        Int8List.fromList(<int>[-15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -5]);
+        Int8List.fromList(<int>[-5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -5]);
     if (loadedEq == null) {
       await storageData.save(SaveDataType.eq, eqValues);
     }
