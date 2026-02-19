@@ -246,7 +246,6 @@ class MainPageState extends State<MainPage>
   bool _userRequestedDisconnect = false;
   Future<void>? _connectionErrorDialogFuture;
   StreamSubscription<AudioInterruptionEvent>? _appInterruptionSub;
-  bool _isAppResumed = true;
 
   @override
   void initState() {
@@ -302,8 +301,8 @@ class MainPageState extends State<MainPage>
             usage: AndroidAudioUsage.media,
           ),
           androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-          // Treat ducking as pause so we fully yield during Assistant, calls, etc.
-          androidWillPauseWhenDucked: true,
+          // Allow ducking
+          androidWillPauseWhenDucked: false,
         ),
       );
 
@@ -417,6 +416,7 @@ class MainPageState extends State<MainPage>
   }
 
   Future<void> onConnected() async {
+    logger.d('onConnected');
     if (_startupCompleted || _startupCompletionInProgress) {
       _hideStartupGate();
       return;
@@ -432,7 +432,7 @@ class MainPageState extends State<MainPage>
         final session = await AudioSession.instance;
         final ok = await session.setActive(
           true,
-          androidWillPauseWhenDucked: appState.detectAudioInterruptions,
+          androidWillPauseWhenDucked: false,
         );
         logger.i('AudioSession setActive(true) onConnected: $ok');
         appState.updateHasAudioFocus(ok);
@@ -592,7 +592,9 @@ class MainPageState extends State<MainPage>
       final session = await AudioSession.instance;
       final ok = await session.setActive(false);
       logger.i('AudioSession setActive(false) onDisconnect: $ok');
-    } catch (_) {}
+    } catch (e) {
+      logger.w('AudioSession setActive(false) onDisconnect failed: $e');
+    }
     appState.updateHasAudioFocus(false);
   }
 
@@ -1139,10 +1141,45 @@ class MainPageState extends State<MainPage>
   void _onAudioFocusChanged() {
     // Ensure audio_service reflects focus changes
     onPlaybackStateChanged();
+
+    // Kick the audio pipeline to resume if we expect to be audible
+    if (appState.hasAudioFocus) {
+      unawaited(_recoverAudioAfterFocusGain(reason: 'audio focus regained'));
+    }
+  }
+
+  Future<void> _recoverAudioAfterFocusGain({required String reason}) async {
+    if (!mounted) return;
+    if (appState.restartPending) return;
+
+    // Only grab/restore audio if we expect to be audible
+    final bool shouldBeAudible = appState.audioPresence ||
+        appState.playbackState == AppPlaybackState.live ||
+        appState.playbackState == AppPlaybackState.recordedContent;
+    if (!shouldBeAudible) return;
+
+    // Re-activate session and resume output
+    if (appState.enableAudio) {
+      try {
+        await audioController.recoverAfterInterruption(reason: reason);
+      } catch (_) {}
+    }
+
+    // Re-assert focus and switch back to Aux-in if we're using native aux input
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        HeadUnitAux.isAvailable &&
+        appState.useNativeAuxInput &&
+        _deviceConnected) {
+      unawaited(_requestAudioFocusForAuxIfNeeded());
+
+      // Only switch if the user enabled "switch to aux on focus gain".
+      if (appState.switchToAuxOnFocusGain) {
+        unawaited(HeadUnitAux.trySwitchToAux());
+      }
+    }
   }
 
   void _startAudioFocusMonitoring() {
-    // Listen even when audio is disabled
     unawaited(() async {
       try {
         await _appInterruptionSub?.cancel();
@@ -1150,14 +1187,20 @@ class MainPageState extends State<MainPage>
       try {
         final session = await AudioSession.instance;
         _appInterruptionSub = session.interruptionEventStream.listen((event) {
+          logger.d(
+              'Audio focus monitoring event: ${event.type} begin=${event.begin}');
           if (!mounted) return;
-          if (event.begin) {
+          final bool isDuck = event.type == AudioInterruptionType.duck;
+
+          if (event.begin && !isDuck) {
             appState.updateHasAudioFocus(false);
-          } else {
-            // Only treat focus as regained if app is resumed
-            if (_isAppResumed) {
-              appState.updateHasAudioFocus(true);
-            }
+          } else if (!event.begin && !isDuck) {
+            appState.updateHasAudioFocus(true);
+          }
+
+          // Route interruption events to the active audio pipeline
+          if (appState.enableAudio && appState.detectAudioInterruptions) {
+            unawaited(audioController.handleInterruptionEvent(event));
           }
         });
       } catch (e, st) {
@@ -1174,7 +1217,7 @@ class MainPageState extends State<MainPage>
     }
     if (!_deviceConnected) return;
 
-    // Only request focus when actually expected to be the active source
+    // Only request focus when we expect to be the active source
     final bool shouldBeSource = appState.audioPresence ||
         appState.playbackState == AppPlaybackState.live ||
         appState.playbackState == AppPlaybackState.recordedContent;
@@ -1184,7 +1227,7 @@ class MainPageState extends State<MainPage>
       final session = await AudioSession.instance;
       final ok = await session.setActive(
         true,
-        androidWillPauseWhenDucked: appState.detectAudioInterruptions,
+        androidWillPauseWhenDucked: false,
       );
       logger.i('AudioSession setActive(true) onResume(nativeAux): $ok');
       appState.updateHasAudioFocus(ok);
@@ -1211,19 +1254,33 @@ class MainPageState extends State<MainPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    _isAppResumed = state == AppLifecycleState.resumed;
 
     if (state == AppLifecycleState.resumed) {
       if (appState.restartPending) return;
       unawaited(_autoRetryConnectionOnResume());
-      // In native aux mode, request audio focus when foregrounded
-      unawaited(_requestAudioFocusForAuxIfNeeded());
+      // Recover audio after returning to foreground (USB and native aux).
+      unawaited(_recoverAudioAfterFocusGain(reason: 'app resumed'));
     }
 
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
-      // Yield media keys to other apps when backgrounded
-      unawaited(_releaseAudioFocusForAuxIfNeeded());
+      // Spotify-style: if we're "playing", keep focus even if backgrounded.
+      // This allows navigation prompts and other transient focus losses to be
+      // reported to us and to auto-recover correctly.
+      final bool shouldBeSource = appState.audioPresence ||
+          appState.playbackState == AppPlaybackState.live ||
+          appState.playbackState == AppPlaybackState.recordedContent;
+      final bool holdFocusInBackground =
+          defaultTargetPlatform == TargetPlatform.android &&
+              HeadUnitAux.isAvailable &&
+              appState.useNativeAuxInput &&
+              _deviceConnected &&
+              shouldBeSource;
+
+      if (!holdFocusInBackground) {
+        // Yield media keys/focus when backgrounded and not expected to play.
+        unawaited(_releaseAudioFocusForAuxIfNeeded());
+      }
     }
 
     if (defaultTargetPlatform != TargetPlatform.android ||
