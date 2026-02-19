@@ -20,8 +20,76 @@ class AudioController {
   AudioRecorder? _recorder;
   StreamSubscription<Uint8List>? _recordStreamSub;
   bool _isPlayingTone = false;
-  StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
   bool _wasPausedByInterruption = false;
+  bool _isDucked = false;
+  static const double _duckGain = 0.2;
+  bool _isPlayingNotificationTone = false;
+  Float32List? _notificationToneMixBuffer;
+  int _notificationToneMixPos = 0;
+
+  AudioController() {
+    logger.t('AudioController initialized');
+    if (!kIsWeb && !kIsWasm) return;
+    _prewarmWebOutput();
+  }
+
+  void _prewarmWebOutput() {
+    if (_audioStreamInitialized) return;
+
+    try {
+      _audioStream.init(
+        waitingBufferMilliSec: 0,
+        bufferMilliSec: 500,
+        sampleRate: sampleRate,
+        channels: 2,
+      );
+      _audioStreamInitialized = true;
+    } catch (_) {}
+  }
+
+  Future<void> ensureWebAudioResumedFromGesture() async {
+    if (!kIsWeb && !kIsWasm) return;
+    if (!_audioStreamInitialized) {
+      _prewarmWebOutput();
+    }
+    try {
+      _audioStream.resume();
+    } catch (_) {}
+  }
+
+  void _armNotificationToneMix(Float32List toneBuffer) {
+    _notificationToneMixBuffer = toneBuffer;
+    _notificationToneMixPos = 0;
+    _isPlayingNotificationTone = true;
+  }
+
+  void _mixNotificationToneInPlace(Float32List io) {
+    final tone = _notificationToneMixBuffer;
+    if (tone == null) return;
+
+    final int remaining = tone.length - _notificationToneMixPos;
+    if (remaining <= 0) {
+      _notificationToneMixBuffer = null;
+      _notificationToneMixPos = 0;
+      _isPlayingNotificationTone = false;
+      return;
+    }
+
+    final int mixLen = math.min(io.length, remaining);
+    int toneIndex = _notificationToneMixPos;
+    for (int i = 0; i < mixLen; i++) {
+      final double s = io[i] + tone[toneIndex++];
+      // Saturate to avoid clipping
+      io[i] = s > 1.0 ? 1.0 : (s < -1.0 ? -1.0 : s);
+    }
+
+    _notificationToneMixPos = toneIndex;
+    if (_notificationToneMixPos >= tone.length) {
+      _notificationToneMixBuffer = null;
+      _notificationToneMixPos = 0;
+      _isPlayingNotificationTone = false;
+    }
+  }
 
   AudioRecorder _ensureRecorder() {
     return _recorder ??= AudioRecorder();
@@ -169,8 +237,7 @@ class AudioController {
             usage: AndroidAudioUsage.media,
           ),
           androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-          // If enabled, treat ducking as a pause so we fully yield
-          androidWillPauseWhenDucked: _detectAudioInterruptions,
+          androidWillPauseWhenDucked: false,
         ),
       );
     } catch (e, st) {
@@ -179,51 +246,12 @@ class AudioController {
 
     if (await session.setActive(
       true,
-      androidWillPauseWhenDucked: _detectAudioInterruptions,
+      androidWillPauseWhenDucked: false,
     )) {
       logger.i('Audio session active');
     } else {
       logger.e('Audio session setup failed');
       return;
-    }
-
-    // Centralize handling of interruptions
-    try {
-      await _interruptionSub?.cancel();
-    } catch (_) {}
-    if (_detectAudioInterruptions) {
-      _interruptionSub = session.interruptionEventStream.listen((event) async {
-        logger.d('Audio interruption: begin=${event.begin} type=${event.type}');
-        if (event.begin) {
-          // Pause capture if currently recording
-          try {
-            if (_recordStreamStarted) {
-              final rec = _recorder;
-              if (rec == null) return;
-              final isRec = await rec.isRecording();
-              final isPaused = await rec.isPaused();
-              if (isRec && !isPaused) {
-                _wasPausedByInterruption = true;
-                await rec.pause();
-              }
-            }
-          } catch (_) {}
-        } else {
-          // Resume only if we paused due to the interruption
-          if (_wasPausedByInterruption) {
-            // Re-apply preferred route first to avoid stale routing after Assistant
-            await _applyPreferredAndroidRoute();
-            _wasPausedByInterruption = false;
-            try {
-              final rec = _recorder;
-              if (rec == null) return;
-              await rec.resume();
-            } catch (_) {}
-          }
-        }
-      });
-    } else {
-      _interruptionSub = null;
     }
 
     // Remember route for re-application after interruption
@@ -237,14 +265,17 @@ class AudioController {
       }
     }
 
-    _audioStream.init(
-      waitingBufferMilliSec: 0,
-      bufferMilliSec: 500,
-      sampleRate: sampleRate,
-      channels: 2,
-    );
-
-    _audioStreamInitialized = true;
+    if ((kIsWeb || kIsWasm) && _audioStreamInitialized) {
+      // Already initialized
+    } else {
+      _audioStream.init(
+        waitingBufferMilliSec: 0,
+        bufferMilliSec: 500,
+        sampleRate: sampleRate,
+        channels: 2,
+      );
+      _audioStreamInitialized = true;
+    }
 
     // Apply preferred Android audio route after audio is active
     await _applyPreferredAndroidRoute();
@@ -368,12 +399,6 @@ class AudioController {
 
   Future<void> stopAudioThread() async {
     logger.t('stopAudioThread: started=$_isStarted');
-    // Stop interruption subscription
-    try {
-      await _interruptionSub?.cancel();
-    } catch (_) {}
-    _interruptionSub = null;
-
     try {
       await _recordStreamSub?.cancel();
     } catch (_) {}
@@ -399,14 +424,100 @@ class AudioController {
     } catch (_) {}
 
     // Only uninit output if it was previously initialized
-    try {
-      if (_audioStreamInitialized) {
-        _audioStream.uninit();
-      }
-    } catch (_) {}
-    _audioStreamInitialized = false;
+    if (!(kIsWeb || kIsWasm)) {
+      try {
+        if (_audioStreamInitialized) {
+          _audioStream.uninit();
+        }
+      } catch (_) {}
+      _audioStreamInitialized = false;
+    }
 
     _isStarted = false;
+  }
+
+  // Handle an interruption event from the app-level AudioSession listener
+  Future<void> handleInterruptionEvent(AudioInterruptionEvent event) async {
+    if (!_isStarted) return;
+    if (!_detectAudioInterruptions) return;
+
+    logger.d(
+        'AudioController interruption: begin=${event.begin} type=${event.type}');
+
+    final bool isDuck = event.type == AudioInterruptionType.duck;
+
+    if (event.begin && isDuck) {
+      _isDucked = true;
+      return;
+    }
+
+    if (!event.begin && isDuck) {
+      _isDucked = false;
+      return;
+    }
+
+    if (event.begin) {
+      // Make sure we're not left ducked
+      _isDucked = false;
+      // Pause capture if currently streaming
+      try {
+        if (_recordStreamStarted) {
+          final rec = _recorder;
+          if (rec == null) return;
+          final isRec = await rec.isRecording();
+          final isPaused = await rec.isPaused();
+          if (isRec && !isPaused) {
+            _wasPausedByInterruption = true;
+            await rec.pause();
+          }
+        }
+      } catch (_) {}
+      return;
+    }
+  }
+
+  // Bring audio back after transient focus loss
+  Future<void> recoverAfterInterruption({String reason = ''}) async {
+    if (!_isStarted) return;
+
+    // Clear ducking on recovery
+    _isDucked = false;
+
+    // Re-apply preferred route first
+    try {
+      await _applyPreferredAndroidRoute();
+    } catch (_) {}
+
+    // Re-activate focus
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(
+        true,
+        androidWillPauseWhenDucked: false,
+      );
+    } catch (_) {}
+
+    // Ensure output is resumed
+    try {
+      if (_audioStreamInitialized) {
+        _audioStream.resume();
+      }
+    } catch (_) {}
+
+    // Resume capture if we paused it due to the interruption
+    if (_wasPausedByInterruption) {
+      _wasPausedByInterruption = false;
+      try {
+        final rec = _recorder;
+        if (rec != null) {
+          await rec.resume();
+        }
+      } catch (_) {}
+    }
+
+    if (reason.isNotEmpty) {
+      logger.i('AudioController recoverAfterInterruption: $reason');
+    }
   }
 
   void dispose() {
