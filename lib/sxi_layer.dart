@@ -3,6 +3,7 @@ import 'dart:developer';
 import 'dart:collection';
 import 'package:orbit/data/sdtp.dart';
 import 'package:orbit/data/sdtp_processor.dart';
+import 'package:orbit/data/xmapp_processor.dart';
 import 'package:orbit/helpers.dart';
 import 'package:orbit/metadata/signal_quality.dart';
 import 'package:orbit/metadata/metadata.dart';
@@ -21,11 +22,13 @@ class SXiLayer {
   final Queue<DeviceMessage> txBuffer = Queue<DeviceMessage>();
   final Queue<DeviceMessage> rxBuffer = Queue<DeviceMessage>();
   late SDTPProcessor sdtpProcessor;
+  late XmAppProcessor xmAppProcessor;
 
   final AppState appState;
 
   SXiLayer(this.appState) {
     sdtpProcessor = SDTPProcessor(this);
+    xmAppProcessor = XmAppProcessor(this);
   }
 
   // Set the program image once loaded
@@ -652,10 +655,21 @@ class SXiLayer {
           break;
         }
 
-        var sdtpPacket = SDTPPacket.fromBytes(dataPayload.dataPacket,
-            dataPayload.packetLenMsb, dataPayload.packetLenLsb);
-
-        sdtpProcessor.processSDTPPacket(dmi, dsi, sdtpPacket);
+        switch (dataPayload.packetType) {
+          case DataServiceType.sdtp:
+            var sdtpPacket = SDTPPacket.fromBytes(dataPayload.dataPacket,
+                dataPayload.packetLenMsb, dataPayload.packetLenLsb);
+            sdtpProcessor.processSDTPPacket(dmi, dsi, sdtpPacket);
+            break;
+          case DataServiceType.xmApp:
+            xmAppProcessor.processXmAppPacket(dmi, dsi, dataPayload.dataPacket,
+                dataPayload.packetLenMsb, dataPayload.packetLenLsb);
+            break;
+          case DataServiceType.rawDataPacket:
+            logger.t(
+                'Ignoring raw data packet for DSI: $dsi, DMI: $dmi, len: ${dataPayload.dataPacket.length}');
+            break;
+        }
         break;
 
       case SXiInstantReplayRecordMetadataIndication recordedMetadata:
