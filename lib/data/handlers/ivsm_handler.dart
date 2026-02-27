@@ -1,6 +1,6 @@
 // Handles In-Vehicle Subscription Messaging data
-import 'dart:io';
 import 'dart:convert';
+import 'package:archive/archive.dart';
 import 'package:orbit/data/data_handler.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/data/access_unit.dart';
@@ -505,7 +505,7 @@ class IVSMHandler extends DSIHandler {
     }
 
     try {
-      final List<int> raw = ZLibDecoder().convert(compressed);
+      final List<int> raw = ZLibDecoder().decodeBytes(compressed);
       final String text = utf8.decode(raw, allowMalformed: true);
       final int lineCount =
           '\n'.allMatches(text).length + (text.isNotEmpty ? 1 : 0);
@@ -957,7 +957,7 @@ class IVSMHandler extends DSIHandler {
     }
 
     try {
-      final List<int> raw = ZLibDecoder().convert(zbytes);
+      final List<int> raw = ZLibDecoder().decodeBytes(zbytes);
       if (raw.length != readUncompressedSize) {
         logger.w(
             'IVSMHandler: Config readUncompressedSize ($readUncompressedSize) != actual (${raw.length}) sig=$signature');

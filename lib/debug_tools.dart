@@ -1,11 +1,10 @@
 import 'dart:async';
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:orbit/data/wxtab_parser.dart';
+import 'package:orbit/data/weather/tabular_weather_parser.dart';
 import 'package:orbit/logging.dart';
+import 'package:universal_io/io.dart';
 
 // FrameTracer, traces the frames sent and received by the device
 class FrameTracer {
@@ -126,10 +125,11 @@ class FrameTracer {
   }
 }
 
-// WxTabDebugTools, parses WxTab files from hex strings
-class WxTabDebugTools {
-  WxTabDebugTools._internal();
-  static final WxTabDebugTools instance = WxTabDebugTools._internal();
+// TabularWeatherDebugTools, parses TabularWeather files from hex strings
+class TabularWeatherDebugTools {
+  TabularWeatherDebugTools._internal();
+  static final TabularWeatherDebugTools instance =
+      TabularWeatherDebugTools._internal();
 
   List<int> _hexToBytes(String s) {
     final cleaned = s.replaceAll(RegExp(r'[^0-9A-Fa-f]'), '');
@@ -140,27 +140,27 @@ class WxTabDebugTools {
     return bytes;
   }
 
-  Future<void> parseWxTabFromHexFile(String path) async {
+  Future<void> parseTabularWeatherFromHexFile(String path) async {
     try {
       final file = File(path);
       if (!await file.exists()) {
-        logger.w('WxTabDebug: File not found: $path');
+        logger.w('TabularWeatherDebug: File not found: $path');
         return;
       }
       final txt = await file.readAsString();
       final bytes = _hexToBytes(txt);
-      logger.i('WxTabDebug: Read ${bytes.length} bytes from $path');
-      final parsed = WxTabParser.parse(bytes,
+      logger.i('TabularWeatherDebug: Read ${bytes.length} bytes from $path');
+      final parsed = TabularWeatherParser.parse(bytes,
           fileName: path.split(Platform.pathSeparator).last);
       logger.i(
-          'WxTabDebug: Parsed WxTab dbVersion=${parsed.dbVersion} fileVersion=${parsed.fileVersion} versionBits=${parsed.fileVersionBits} states=${parsed.states.length}');
+          'TabularWeatherDebug: Parsed TabularWeather dbVersion=${parsed.dbVersion} fileVersion=${parsed.fileVersion} versionBits=${parsed.fileVersionBits} states=${parsed.states.length}');
       if (parsed.states.isNotEmpty) {
         final s = parsed.states.first;
         logger.i(
-            'WxTabDebug: First state id=${s.id} entries=${s.entries.length}');
+            'TabularWeatherDebug: First state id=${s.id} entries=${s.entries.length}');
       }
     } catch (e) {
-      logger.w('WxTabDebug: Parse failed: $e');
+      logger.w('TabularWeatherDebug: Parse failed: $e');
     }
   }
 }

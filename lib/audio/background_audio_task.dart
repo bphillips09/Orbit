@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:orbit/app_state.dart';
@@ -12,6 +11,7 @@ import 'package:orbit/sxi_commands.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:orbit/logging.dart';
 import 'package:orbit/platform/now_playing_indicator.dart';
+import 'package:universal_io/io.dart';
 
 class AudioServiceHandler extends BaseAudioHandler
     with QueueHandler, SeekHandler {

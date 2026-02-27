@@ -4,8 +4,6 @@ class BitBuffer {
   int _validBits = 0; // Remaining valid bits in the seed
   int _seed = 0; // Stores buffered bits
   bool _error = false; // Error flag
-  // Callback invoked when more data is needed. Should return 0
-  // on success and non-zero on failure; on failure `_error` is set
   Function? replenish; // Callback for replenishing the buffer
 
   BitBuffer(this.buffer, {this.replenish});

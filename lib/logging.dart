@@ -1,11 +1,11 @@
 // Logging class
 import 'dart:async';
 import 'dart:collection';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:universal_io/io.dart';
 
 class AppLogger {
   AppLogger._internal();

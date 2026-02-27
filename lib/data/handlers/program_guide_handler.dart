@@ -7,7 +7,7 @@ import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/sxi_layer.dart';
 import 'package:orbit/crc.dart';
 import 'dart:convert' as conv;
-import 'dart:io' as io;
+import 'package:universal_io/io.dart';
 
 class ProgramGuideHandler extends DSIHandler {
   ProgramGuideHandler(SXiLayer sxiLayer)
@@ -1538,7 +1538,7 @@ class ProgramGuideHandler extends DSIHandler {
     // Decompress the aggregated buffer
     // Try standard zlib first (Header indicates zlib format)
     try {
-      final List<int> decompressed = io.ZLibCodec().decode(aggregated);
+      final List<int> decompressed = ZLibCodec().decode(aggregated);
       final List<String> strings = _splitZeroTerminatedUtf8(decompressed);
       pool.stringTables[segIdx] = strings;
       pool.stringTablesById[segIdx] = strings;
@@ -1550,8 +1550,7 @@ class ProgramGuideHandler extends DSIHandler {
           .w('EPG: seg=$segIdx zlib decode failed: $e, trying raw deflate...');
       // Fallback to raw deflate on aggregated stream
       try {
-        final List<int> decompressed =
-            io.ZLibCodec(raw: true).decode(aggregated);
+        final List<int> decompressed = ZLibCodec(raw: true).decode(aggregated);
         final List<String> strings = _splitZeroTerminatedUtf8(decompressed);
         pool.stringTables[segIdx] = strings;
         pool.stringTablesById[segIdx] = strings;
@@ -1594,7 +1593,7 @@ class ProgramGuideHandler extends DSIHandler {
           _logBase64Dump('EPG: seg=$segIdx TEXT per-AU[$idx] compressed', rem);
           // Try standard zlib first for this AU
           try {
-            final List<int> part = io.ZLibCodec().decode(rem);
+            final List<int> part = ZLibCodec().decode(rem);
             decompressedParts.addAll(part);
             logger.t(
                 'EPG: seg=$segIdx per-AU[$idx] zlib OK -> ${part.length} bytes');
@@ -1604,7 +1603,7 @@ class ProgramGuideHandler extends DSIHandler {
           }
           // Try raw deflate for this AU
           try {
-            final List<int> part = io.ZLibCodec(raw: true).decode(rem);
+            final List<int> part = ZLibCodec(raw: true).decode(rem);
             decompressedParts.addAll(part);
             logger.t(
                 'EPG: seg=$segIdx per-AU[$idx] raw-deflate OK -> ${part.length} bytes');
