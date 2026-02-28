@@ -1,6 +1,6 @@
 // DeviceLayer, handles the raw communication with the device
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'dart:typed_data';
 import 'package:orbit/helpers.dart';
 import 'package:orbit/device_message.dart';
 import 'package:orbit/serial_helper/serial_helper_interface.dart';
@@ -14,11 +14,21 @@ import 'package:orbit/logging.dart';
 import 'package:orbit/debug_tools_stub.dart'
     if (dart.library.io) 'package:orbit/debug_tools.dart';
 
+enum TimingStage {
+  initPayloadToAck,
+  openStartToFirstRx,
+  disconnectDetectedToReconnect,
+  baudSwitchToStableRx,
+}
+
 class DeviceLayer {
   // Handshake and heartbeat timing
-  static const Duration deviceResponseTimeout = Duration(seconds: 10);
-  static const Duration heartbeatInterval = Duration(seconds: 2);
+  static const Duration initResponseTimeout = Duration(seconds: 4);
+  static const Duration reconnectResponseTimeout = Duration(seconds: 5);
+  static const Duration heartbeatInterval = Duration(seconds: 5);
   static const Duration heartbeatStaleThreshold = Duration(seconds: 10);
+  static const Duration initRetryInterval = Duration(milliseconds: 250);
+  static const int configPacingMs = 90;
   // Buffer management
   static const int maxRxBufferBytes = 4096; // Cap to avoid overflow
 
@@ -43,6 +53,8 @@ class DeviceLayer {
   Timer? _heartbeatMonitorTimer;
   DateTime? _lastValidMessage;
   Timer? _networkInitRetryTimer;
+  final Map<TimingStage, DateTime> _timingStarts = <TimingStage, DateTime>{};
+  bool _firstRxSeen = false;
 
   DeviceLayer(
     this._sxiLayer,
@@ -64,8 +76,22 @@ class DeviceLayer {
     onConnectionDetailChanged?.call(title, details);
   }
 
+  void _startTiming(TimingStage stage) {
+    _timingStarts[stage] = DateTime.now();
+  }
+
+  void _finishTiming(TimingStage stage, {bool success = true}) {
+    final start = _timingStarts.remove(stage);
+    if (start == null) return;
+    final elapsedMs = DateTime.now().difference(start).inMilliseconds;
+    final result = success ? 'ok' : 'fail';
+    logger.i('Timing stage: $stage, result: $result, elapsed: ${elapsedMs}ms');
+  }
+
   Future<bool> startupSequence() async {
     _initialized = false;
+    _firstRxSeen = false;
+    _timingStarts.clear();
     _sxiLayer.deviceLayer = this;
     _stopHeartbeatMonitor();
 
@@ -105,23 +131,29 @@ class DeviceLayer {
 
       // Issue a second CONFIG to the UART-over-IP backend
       try {
-        final dynamic helper = _serialHelper;
-        final ok = await helper.configureNetworkUartBaud(57600);
+        final ok = await _serialHelper.reconfigureBaud(
+          57600,
+          transport: SerialTransport.network,
+        );
         logger.i('Network UART CONFIG result: $ok');
       } catch (_) {}
 
       // Send init and retry at 500ms intervals until any response arrives
+      _startTiming(TimingStage.initPayloadToAck);
       await sendInitPayload();
       logger.i('Waiting for device response...');
       _networkInitRetryTimer?.cancel();
-      _networkInitRetryTimer =
-          Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      _networkInitRetryTimer = Timer.periodic(initRetryInterval, (_) async {
         try {
           await sendInitPayload();
         } catch (_) {}
       });
 
-      final gotResponse = await _waitForMessage(anyDeviceMessage: false);
+      final gotResponse = await _waitForMessage(
+        anyDeviceMessage: false,
+        timeout: initResponseTimeout,
+      );
+      _finishTiming(TimingStage.initPayloadToAck, success: gotResponse);
       _networkInitRetryTimer?.cancel();
       _networkInitRetryTimer = null;
 
@@ -151,9 +183,10 @@ class DeviceLayer {
 
       final int desiredSecondaryBaud = _sxiLayer.appState.secondaryBaudRate;
       if (desiredSecondaryBaud == 57600) return;
-      final dynamic helper = _serialHelper;
-      final bool ok =
-          await helper.configureNetworkUartBaud(desiredSecondaryBaud);
+      final bool ok = await _serialHelper.reconfigureBaud(
+        desiredSecondaryBaud,
+        transport: SerialTransport.network,
+      );
       logger.i('Network UART CONFIG to $desiredSecondaryBaud result: $ok');
       if (ok) {
         await Future.delayed(const Duration(milliseconds: 50));
@@ -166,8 +199,10 @@ class DeviceLayer {
   // Attempt to initialize the device at a given baud rate
   Future<bool> _attemptInitializationAtBaudRate(int baudRate) async {
     _updateConnectionDetail('Initializing...');
+    _startTiming(TimingStage.openStartToFirstRx);
 
     if (!await _serialHelper.openPort(port, baudRate, transport: transport)) {
+      _finishTiming(TimingStage.openStartToFirstRx, success: false);
       onError?.call('Failed to open $port at $baudRate baud', false);
       return false;
     }
@@ -181,11 +216,16 @@ class DeviceLayer {
     });
 
     _updateConnectionDetail('Sending init to device...');
+    _startTiming(TimingStage.initPayloadToAck);
     await sendInitPayload();
 
     // Wait for the device to respond to the init payload
     // If it does, switch to preferred secondary baud
-    if (await _waitForMessage()) {
+    final gotInit = await _waitForMessage(
+      timeout: initResponseTimeout,
+    );
+    _finishTiming(TimingStage.initPayloadToAck, success: gotInit);
+    if (gotInit) {
       final int desiredSecondaryBaud = _sxiLayer.appState.secondaryBaudRate;
       return await switchBaudRate(desiredSecondaryBaud);
     }
@@ -199,8 +239,10 @@ class DeviceLayer {
   Future<bool> _attemptConnectionAtBaudRate(int baudRate) async {
     _updateConnectionDetail(
         'Starting secondary connection at $baudRate baud...');
+    _startTiming(TimingStage.openStartToFirstRx);
 
     if (!await _serialHelper.openPort(port, baudRate, transport: transport)) {
+      _finishTiming(TimingStage.openStartToFirstRx, success: false);
       onError?.call('Failed to open $port at $baudRate baud', false);
       return false;
     }
@@ -213,7 +255,14 @@ class DeviceLayer {
       }
     });
 
-    if (await _waitForMessage(anyDeviceMessage: true)) {
+    _startTiming(TimingStage.disconnectDetectedToReconnect);
+    final reconnected = await _waitForMessage(
+      anyDeviceMessage: true,
+      timeout: reconnectResponseTimeout,
+    );
+    _finishTiming(TimingStage.disconnectDetectedToReconnect,
+        success: reconnected);
+    if (reconnected) {
       return true;
     }
 
@@ -252,10 +301,12 @@ class DeviceLayer {
   }
 
   // Any valid device message unblocks the wait
-  Future<bool> _waitForMessage({bool anyDeviceMessage = false}) async {
+  Future<bool> _waitForMessage({
+    bool anyDeviceMessage = false,
+    Duration timeout = initResponseTimeout,
+  }) async {
     _updateConnectionDetail('Waiting for device to respond...');
 
-    const timeout = deviceResponseTimeout;
     final completer = Completer<bool>();
 
     Timer(timeout, () {
@@ -317,6 +368,10 @@ class DeviceLayer {
 
     // Treat any received bytes as heartbeat
     _lastValidMessage = DateTime.now();
+    if (!_firstRxSeen && data.isNotEmpty) {
+      _firstRxSeen = true;
+      _finishTiming(TimingStage.openStartToFirstRx);
+    }
     _buffer = Uint8List.fromList(_buffer + data);
 
     // Limit the buffer size to prevent overflow
@@ -432,6 +487,7 @@ class DeviceLayer {
     }
 
     logger.t('Send Control Command: $payload');
+    _markAudioResumeIntentIfNeeded(payload);
 
     // Increment the sequence number
     final sequence = incrementSequence();
@@ -445,6 +501,24 @@ class DeviceLayer {
     _sxiLayer.cycleState();
 
     return message;
+  }
+
+  void _markAudioResumeIntentIfNeeded(SXiPayload payload) {
+    bool shouldResume = false;
+
+    if (payload is SXiSelectChannelCommand) {
+      shouldResume = payload.routing == AudioRoutingType.routeToAudio ||
+          payload.routing == AudioRoutingType.routeToAudioAndRecording;
+    } else if (payload is SXiInstantReplayPlaybackControlCommand) {
+      shouldResume = payload.control != PlaybackControlType.pause &&
+          payload.control != PlaybackControlType.reserved;
+    }
+
+    if (!shouldResume) return;
+
+    try {
+      _sxiLayer.appState.markAudioResumeIntent();
+    } catch (_) {}
   }
 
   // Send a frame to the device
@@ -784,7 +858,7 @@ class DeviceLayer {
 
     // Send the module configuration payload in sequence
     for (int i = 0; i < initPayloads.length; i++) {
-      Future.delayed(Duration(milliseconds: 500 * i), () {
+      Future.delayed(Duration(milliseconds: configPacingMs * i), () {
         sendControlCommand(initPayloads[i]);
       });
     }
@@ -792,34 +866,36 @@ class DeviceLayer {
 
   // Switch the baud rate
   Future<bool> switchBaudRate(int newBaudRate) async {
-    _updateConnectionDetail('Closing existing connection...');
-    await _serialHelper.closePort();
-
-    bool portOpened = false;
-
-    _updateConnectionDetail('Opening new connection at $newBaudRate...');
-    if (kIsWeb || kIsWasm) {
-      portOpened =
-          await _serialHelper.openPort(port, newBaudRate, transport: transport);
-    } else {
-      portOpened =
-          await _serialHelper.openPort(port, newBaudRate, transport: transport);
-    }
-    if (portOpened) {
-      _serialHelper.readData(_processData, (error, expectedClosure) {
-        if (!expectedClosure) {
-          _initialized = false;
-          onError?.call(error.toString(), true);
-          _stopHeartbeatMonitor();
-        }
-      });
-
+    _startTiming(TimingStage.baudSwitchToStableRx);
+    _updateConnectionDetail('Reconfiguring connection at $newBaudRate...');
+    final inPlaceOk = await _serialHelper.reconfigureBaud(
+      newBaudRate,
+      transport: transport,
+    );
+    if (inPlaceOk) {
+      _finishTiming(TimingStage.baudSwitchToStableRx);
       return true;
-    } else {
+    }
+
+    _updateConnectionDetail('Reopening connection at $newBaudRate baud...');
+    await _serialHelper.closePort();
+    final portOpened =
+        await _serialHelper.openPort(port, newBaudRate, transport: transport);
+    if (!portOpened) {
+      _finishTiming(TimingStage.baudSwitchToStableRx, success: false);
       onError?.call(
           'Unable to open $port at $newBaudRate baud, Unknown Error', false);
       return false;
     }
+    _serialHelper.readData(_processData, (error, expectedClosure) {
+      if (!expectedClosure) {
+        _initialized = false;
+        onError?.call(error.toString(), true);
+        _stopHeartbeatMonitor();
+      }
+    });
+    _finishTiming(TimingStage.baudSwitchToStableRx);
+    return true;
   }
 
   void addFavorites(List<int> songIDs, List<int> artistIDs) {
@@ -873,7 +949,7 @@ class DeviceLayer {
       return;
     }
     for (int i = 0; i < commands.length; i++) {
-      Future.delayed(Duration(milliseconds: 500 * i), () {
+      Future.delayed(Duration(milliseconds: configPacingMs * i), () {
         sendControlCommand(commands[i]);
       });
     }
@@ -930,7 +1006,7 @@ class DeviceLayer {
       return;
     }
     for (int i = 0; i < commands.length; i++) {
-      Future.delayed(Duration(milliseconds: 500 * i), () {
+      Future.delayed(Duration(milliseconds: configPacingMs * i), () {
         sendControlCommand(commands[i]);
       });
     }
@@ -1000,7 +1076,7 @@ class DeviceLayer {
       return;
     }
     for (int i = 0; i < commands.length; i++) {
-      Future.delayed(Duration(milliseconds: 500 * i), () {
+      Future.delayed(Duration(milliseconds: configPacingMs * i), () {
         sendControlCommand(commands[i]);
       });
     }
