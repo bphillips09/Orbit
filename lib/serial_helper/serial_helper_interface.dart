@@ -22,6 +22,10 @@ abstract class SerialHelper {
     Function(Object, bool) onEnd,
   );
   Future<bool> closePort();
+  Future<bool> reconfigureBaud(
+    int baud, {
+    SerialTransport transport = SerialTransport.serial,
+  });
   Future<String> getPortName(Object port);
   Future<bool> ensureSerialPermission();
 
