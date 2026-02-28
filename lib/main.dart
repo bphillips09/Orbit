@@ -246,6 +246,7 @@ class MainPageState extends State<MainPage>
   bool _userRequestedDisconnect = false;
   Future<void>? _connectionErrorDialogFuture;
   StreamSubscription<AudioInterruptionEvent>? _appInterruptionSub;
+  bool _resumeAfterTransientInterruption = false;
 
   @override
   void initState() {
@@ -326,6 +327,7 @@ class MainPageState extends State<MainPage>
       appState.playbackStateNotifier.addListener(onPlaybackStateChanged);
       appState.audioPresenceNotifier.addListener(_onAudioPresenceChanged);
       appState.audioFocusNotifier.addListener(_onAudioFocusChanged);
+      appState.audioResumeIntentNotifier.addListener(_onAudioResumeIntent);
       appState.favoriteOnAirNotifier.addListener(onFavoriteOnAir);
 
       try {
@@ -1126,6 +1128,7 @@ class MainPageState extends State<MainPage>
     appState.playbackStateNotifier.removeListener(onPlaybackStateChanged);
     appState.audioPresenceNotifier.removeListener(_onAudioPresenceChanged);
     appState.audioFocusNotifier.removeListener(_onAudioFocusChanged);
+    appState.audioResumeIntentNotifier.removeListener(_onAudioResumeIntent);
     appState.favoriteOnAirNotifier.removeListener(onFavoriteOnAir);
     _onAirShowTimer?.cancel();
     channelTextFocusNode.dispose();
@@ -1141,22 +1144,38 @@ class MainPageState extends State<MainPage>
   void _onAudioFocusChanged() {
     // Ensure audio_service reflects focus changes
     onPlaybackStateChanged();
-
-    // Kick the audio pipeline to resume if we expect to be audible
-    if (appState.hasAudioFocus) {
-      unawaited(_recoverAudioAfterFocusGain(reason: 'audio focus regained'));
-    }
   }
 
-  Future<void> _recoverAudioAfterFocusGain({required String reason}) async {
+  void _onAudioResumeIntent() {
+    if (!mounted) return;
+    if (appState.restartPending) return;
+    unawaited(_recoverAudioAfterFocusGain(
+      reason: 'audio resume intent',
+      force: true,
+      requestFocusEvenIfNotAudible: true,
+    ));
+  }
+
+  bool _isOrbitActivelyPlaying({bool requireFocus = false}) {
+    final bool isPlaying = appState.audioPresence ||
+        appState.playbackState == AppPlaybackState.live ||
+        appState.playbackState == AppPlaybackState.recordedContent;
+    if (!isPlaying) return false;
+    if (!requireFocus) return true;
+    return appState.hasAudioFocus;
+  }
+
+  Future<void> _recoverAudioAfterFocusGain({
+    required String reason,
+    bool force = false,
+    bool requestFocusEvenIfNotAudible = false,
+  }) async {
     if (!mounted) return;
     if (appState.restartPending) return;
 
     // Only grab/restore audio if we expect to be audible
-    final bool shouldBeAudible = appState.audioPresence ||
-        appState.playbackState == AppPlaybackState.live ||
-        appState.playbackState == AppPlaybackState.recordedContent;
-    if (!shouldBeAudible) return;
+    final bool shouldBeAudible = _isOrbitActivelyPlaying();
+    if (!force && !shouldBeAudible) return;
 
     // Re-activate session and resume output
     if (appState.enableAudio) {
@@ -1170,7 +1189,9 @@ class MainPageState extends State<MainPage>
         HeadUnitAux.isAvailable &&
         appState.useNativeAuxInput &&
         _deviceConnected) {
-      unawaited(_requestAudioFocusForAuxIfNeeded());
+      unawaited(_requestAudioFocusForAuxIfNeeded(
+        force: requestFocusEvenIfNotAudible,
+      ));
 
       // Only switch if the user enabled "switch to aux on focus gain".
       if (appState.switchToAuxOnFocusGain) {
@@ -1193,9 +1214,17 @@ class MainPageState extends State<MainPage>
           final bool isDuck = event.type == AudioInterruptionType.duck;
 
           if (event.begin && !isDuck) {
+            _resumeAfterTransientInterruption =
+                _isOrbitActivelyPlaying(requireFocus: true);
             appState.updateHasAudioFocus(false);
           } else if (!event.begin && !isDuck) {
             appState.updateHasAudioFocus(true);
+            if (_resumeAfterTransientInterruption) {
+              _resumeAfterTransientInterruption = false;
+              unawaited(_recoverAudioAfterFocusGain(
+                reason: 'transient interruption ended',
+              ));
+            }
           }
 
           // Route interruption events to the active audio pipeline
@@ -1209,7 +1238,7 @@ class MainPageState extends State<MainPage>
     }());
   }
 
-  Future<void> _requestAudioFocusForAuxIfNeeded() async {
+  Future<void> _requestAudioFocusForAuxIfNeeded({bool force = false}) async {
     if (defaultTargetPlatform != TargetPlatform.android ||
         !HeadUnitAux.isAvailable ||
         !appState.useNativeAuxInput) {
@@ -1221,7 +1250,7 @@ class MainPageState extends State<MainPage>
     final bool shouldBeSource = appState.audioPresence ||
         appState.playbackState == AppPlaybackState.live ||
         appState.playbackState == AppPlaybackState.recordedContent;
-    if (!shouldBeSource) return;
+    if (!force && !shouldBeSource) return;
 
     try {
       final session = await AudioSession.instance;
@@ -1259,7 +1288,11 @@ class MainPageState extends State<MainPage>
       if (appState.restartPending) return;
       unawaited(_autoRetryConnectionOnResume());
       // Recover audio after returning to foreground (USB and native aux).
-      unawaited(_recoverAudioAfterFocusGain(reason: 'app resumed'));
+      unawaited(_recoverAudioAfterFocusGain(
+        reason: 'app resumed',
+        force: true,
+        requestFocusEvenIfNotAudible: true,
+      ));
     }
 
     if (state == AppLifecycleState.paused ||

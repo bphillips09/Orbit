@@ -78,6 +78,7 @@ class AppState extends ChangeNotifier {
       ValueNotifier(AppPlaybackState.stopped);
   final ValueNotifier<bool> audioPresenceNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<bool> audioFocusNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<int> audioResumeIntentNotifier = ValueNotifier<int>(0);
   final ValueNotifier<FavoriteOnAirEvent?> favoriteOnAirNotifier =
       ValueNotifier<FavoriteOnAirEvent?>(null);
 
@@ -880,6 +881,10 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void markAudioResumeIntent() {
+    audioResumeIntentNotifier.value = audioResumeIntentNotifier.value + 1;
+  }
+
   void updateAudioDecoderBitrate(int bitrate) {
     _audioDecoderBitrate = bitrate;
     notifyListeners();
@@ -1164,6 +1169,9 @@ class AppState extends ChangeNotifier {
     } catch (_) {}
     try {
       audioFocusNotifier.dispose();
+    } catch (_) {}
+    try {
+      audioResumeIntentNotifier.dispose();
     } catch (_) {}
     try {
       favoriteOnAirNotifier.dispose();
