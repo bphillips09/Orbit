@@ -53,6 +53,9 @@ class WebSerialHelper implements SerialHelper {
 
   @override
   Future<bool> ensureSerialPermission() => _uart.ensureSerialPermission();
+
+  @override
+  String? getLastError() => _uart.lastError;
 }
 
 SerialHelper getSerialHelper() => WebSerialHelper();

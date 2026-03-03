@@ -76,6 +76,18 @@ class DeviceLayer {
     onConnectionDetailChanged?.call(title, details);
   }
 
+  String _showFailureMessage(int attemptedBaud) {
+    final base = 'Failed to open $port at $attemptedBaud baud';
+    final serialError = _serialHelper.getLastError()?.trim();
+    if (serialError == null || serialError.isEmpty) {
+      logger.e('Serial open failed: port: $port baud: $attemptedBaud');
+      return base;
+    }
+    logger.e(
+        'Serial open failed: port: $port baud: $attemptedBaud error: $serialError');
+    return '$base\nUnderlying serial error: $serialError';
+  }
+
   void _startTiming(TimingStage stage) {
     _timingStarts[stage] = DateTime.now();
   }
@@ -117,7 +129,7 @@ class DeviceLayer {
         networkInitBaud,
         transport: transport,
       )) {
-        onError?.call('Failed to open $port at $baudRate baud', false);
+        onError?.call(_showFailureMessage(networkInitBaud), false);
         return false;
       }
 
@@ -203,7 +215,7 @@ class DeviceLayer {
 
     if (!await _serialHelper.openPort(port, baudRate, transport: transport)) {
       _finishTiming(TimingStage.openStartToFirstRx, success: false);
-      onError?.call('Failed to open $port at $baudRate baud', false);
+      onError?.call(_showFailureMessage(baudRate), false);
       return false;
     }
 
@@ -243,7 +255,7 @@ class DeviceLayer {
 
     if (!await _serialHelper.openPort(port, baudRate, transport: transport)) {
       _finishTiming(TimingStage.openStartToFirstRx, success: false);
-      onError?.call('Failed to open $port at $baudRate baud', false);
+      onError?.call(_showFailureMessage(baudRate), false);
       return false;
     }
 
@@ -883,8 +895,7 @@ class DeviceLayer {
         await _serialHelper.openPort(port, newBaudRate, transport: transport);
     if (!portOpened) {
       _finishTiming(TimingStage.baudSwitchToStableRx, success: false);
-      onError?.call(
-          'Unable to open $port at $newBaudRate baud, Unknown Error', false);
+      onError?.call(_showFailureMessage(newBaudRate), false);
       return false;
     }
     _serialHelper.readData(_processData, (error, expectedClosure) {

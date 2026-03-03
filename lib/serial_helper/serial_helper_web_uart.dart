@@ -11,6 +11,9 @@ class WebUartHelper {
   web.WritableStreamDefaultWriter? writer;
   web.ReadableStreamDefaultReader? reader;
   bool read = false;
+  String? _lastError;
+
+  String? get lastError => _lastError;
 
   Future<List<Object>> listPorts() async {
     final ports = await web.window.navigator.serial.getPorts().toDart;
@@ -18,6 +21,7 @@ class WebUartHelper {
   }
 
   Future<bool> openPort(Object? port, int baud) async {
+    _lastError = null;
     try {
       if (_serialPort == null) {
         if (port == null || port == '') {
@@ -32,13 +36,15 @@ class WebUartHelper {
       reader = null;
       return true;
     } catch (e) {
-      logger.e('Error opening web UART port: $e');
+      _lastError = 'Error opening web UART port: $e';
+      logger.e(_lastError!);
       return false;
     }
   }
 
   Future<bool> reconfigureBaud(int baud) async {
     if (_serialPort == null) return false;
+    _lastError = 'In-place baud reconfiguration is not supported on Web';
     logger.w('In-place baud reconfiguration is not supported on Web');
     return false;
   }

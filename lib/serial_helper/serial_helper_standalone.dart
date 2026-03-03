@@ -75,6 +75,14 @@ class StandaloneSerialHelper implements SerialHelper {
 
   @override
   Future<bool> ensureSerialPermission() => _uart.ensureSerialPermission();
+
+  @override
+  String? getLastError() {
+    if (_activeTransport == SerialTransport.network) {
+      return _uartip.lastError;
+    }
+    return _uart.lastError;
+  }
 }
 
 SerialHelper getSerialHelper() => StandaloneSerialHelper();

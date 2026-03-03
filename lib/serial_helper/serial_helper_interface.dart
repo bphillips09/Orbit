@@ -28,6 +28,7 @@ abstract class SerialHelper {
   });
   Future<String> getPortName(Object port);
   Future<bool> ensureSerialPermission();
+  String? getLastError();
 
   factory SerialHelper() => getSerialHelper();
 }

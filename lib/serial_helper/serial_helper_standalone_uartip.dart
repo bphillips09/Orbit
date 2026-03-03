@@ -42,22 +42,35 @@ class StandaloneUartIpHelper {
   Completer<void>? _writeMutex;
   Completer<void>? _ioMutex;
   bool expectedClosure = false;
+  String? _lastError;
+
+  String? get lastError => _lastError;
 
   bool get isConnected => _usingNetwork && _socket != null;
 
   Future<bool> openPort(Object? port, int baud) async {
+    _lastError = null;
     final portString = (port ?? '').toString().trim();
-    if (portString.isEmpty) return false;
+    if (portString.isEmpty) {
+      _lastError = 'Network endpoint is empty. Expected host:uartPort[:gpioPort].';
+      return false;
+    }
 
     try {
       final parts = portString.split(':');
-      if (parts.length < 2 || parts[0].trim().isEmpty) return false;
+      if (parts.length < 2 || parts[0].trim().isEmpty) {
+        _lastError = 'Invalid network endpoint "$portString". Expected host:uartPort[:gpioPort].';
+        return false;
+      }
       _networkHost = parts[0].trim();
       _networkUartPort = int.tryParse(parts[1].trim()) ?? 0;
       _networkGpioPort =
           parts.length >= 3 ? int.tryParse(parts[2].trim()) : null;
       _networkBaud = baud;
-      if (_networkUartPort <= 0 || _networkUartPort > 65535) return false;
+      if (_networkUartPort <= 0 || _networkUartPort > 65535) {
+        _lastError = 'Invalid UART-over-IP TCP port "${parts[1].trim()}".';
+        return false;
+      }
 
       _socket = await Socket.connect(
         _networkHost,
@@ -85,6 +98,7 @@ class StandaloneUartIpHelper {
       _startRecvPolling();
       return true;
     } catch (e) {
+      _lastError = 'Failed to connect to UART-over-IP endpoint "$portString": $e';
       logger.e('Failed to connect to UART-over-IP endpoint: $e');
       try {
         await _socket?.close();
@@ -99,7 +113,8 @@ class StandaloneUartIpHelper {
     _networkBaud = baud;
     try {
       return await _uartSendConfig(baud);
-    } catch (_) {
+    } catch (e) {
+      _lastError = 'UART-over-IP reconfigure baud failed: $e';
       return false;
     }
   }
