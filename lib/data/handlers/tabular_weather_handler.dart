@@ -1,7 +1,7 @@
 // Tabular Weather Handler
 import 'package:orbit/data/baudot.dart';
 import 'package:orbit/data/data_handler.dart';
-import 'package:orbit/data/forecast_parser.dart';
+import 'package:orbit/data/weather/forecast_parser.dart';
 import 'package:orbit/data/rfd.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/sxi_layer.dart';
@@ -9,7 +9,7 @@ import 'package:orbit/logging.dart';
 import 'package:orbit/data/access_unit.dart';
 import 'package:orbit/data/bit_buffer.dart';
 import 'package:orbit/crc.dart';
-import 'package:orbit/data/wxtab_parser.dart';
+import 'package:orbit/data/weather/tabular_weather_parser.dart';
 
 class TabularWeatherHandler extends DSIHandler {
   TabularWeatherHandler(SXiLayer sxiLayer)
@@ -113,15 +113,15 @@ class TabularWeatherHandler extends DSIHandler {
     }
 
     final int aseq = b.readBits(2);
-    final int locId = b.readBits(7);
-    logger.t('TabularWeatherHandler: Forecast: aseq=$aseq locId=$locId');
+    final int stateFromHdr = b.readBits(7);
+    final int locId = aseq == 3 ? b.readBits(6) : 1;
+    logger.t(
+        'TabularWeatherHandler: Forecast: aseq=$aseq stateFromHdr=$stateFromHdr locId=$locId');
     int state;
     if (aseq == 3) {
-      state = b.readBits(6);
+      state = stateFromHdr;
     } else if (aseq == 2) {
-      // Derive state from body when ASEQ==2 instead of defaulting to 1
-      final int? derived = _deriveFirstStateFromBody(unit.data);
-      state = derived ?? 1;
+      state = stateFromHdr;
     } else {
       logger.w(
           'TabularWeatherHandler: Forecast: invalid ASEQ for first location: $aseq');
@@ -135,8 +135,7 @@ class TabularWeatherHandler extends DSIHandler {
       return;
     }
 
-    // Remaining AU body from AU payload to preserve original packing
-    final List<int> body = unit.data;
+    final List<int> body = unit.getHeaderAndData();
     if (body.isEmpty) {
       logger.w('TabularWeatherHandler: Forecast: empty AU body');
       return;
@@ -164,21 +163,26 @@ class TabularWeatherHandler extends DSIHandler {
         _forecastCache.putIfAbsent(forecastType, () => <WeatherCacheEntry>[]);
     _addOrUpdateEntry(cache, entry);
 
+    sxiLayer.appState.tabularWeatherState.ingestTabularWeatherForecastAu(
+      forecastType: forecastType,
+      body: body,
+    );
+
     logger.i(
         'TabularWeatherHandler: Forecast: saved type $forecastType (State: $state, LocId: $locId, size: ${body.length})');
   }
 
   void _handleSkiCond(BitBuffer b, AccessUnit unit) {
     final int aseq = b.readBits(2);
-    final int locId = b.readBits(7);
-    logger.t('TabularWeatherHandler: Ski: aseq=$aseq locId=$locId');
+    final int stateFromHdr = b.readBits(7);
+    final int locId = aseq == 3 ? b.readBits(6) : 1;
+    logger.t(
+        'TabularWeatherHandler: Ski: aseq=$aseq stateFromHdr=$stateFromHdr locId=$locId');
     int state;
     if (aseq == 3) {
-      state = b.readBits(6);
+      state = stateFromHdr;
     } else if (aseq == 2) {
-      // Derive state from body when ASEQ==2 instead of defaulting to 1
-      final int? derived = _deriveFirstStateFromBody(unit.data);
-      state = derived ?? 1;
+      state = stateFromHdr;
     } else {
       logger.w(
           'TabularWeatherHandler: Ski: invalid ASEQ for first location: $aseq');
@@ -192,14 +196,13 @@ class TabularWeatherHandler extends DSIHandler {
       return;
     }
 
-    // Remaining AU body from AU payload to preserve original packing
-    final List<int> body = unit.data;
+    final List<int> body = unit.getHeaderAndData();
     if (body.isEmpty) {
       logger.w('TabularWeatherHandler: Ski: empty AU body');
       return;
     }
 
-    // Log parsed event for this state/location (if available)
+    // Log parsed event for this state/location
     try {
       final ForecastRecord? rec = parseForecastFor(state, locId, body);
       logger.i(
@@ -221,37 +224,6 @@ class TabularWeatherHandler extends DSIHandler {
     _addOrUpdateEntry(_skiCache, entry);
     logger.i(
         'TabularWeatherHandler: Ski: saved (State: $state, LocId: $locId, size: ${body.length})');
-  }
-
-  int? _deriveFirstStateFromBody(List<int> body) {
-    if (body.isEmpty) return null;
-    final BitBuffer bb = BitBuffer(body);
-    // Skip initial 11 bits
-    bb.readBits(11);
-    int curState = 0;
-    int curLoc = 0;
-    while (!bb.hasError) {
-      final int tag = bb.readBits(2);
-      if (bb.hasError) break;
-      switch (tag) {
-        case 0:
-          curLoc = (curLoc + 1) & 0x3F;
-          break;
-        case 1:
-          curLoc = bb.readBits(6);
-          break;
-        case 2:
-          curState = bb.readBits(7);
-          return curState;
-        case 3:
-          curState = bb.readBits(7);
-          curLoc = bb.readBits(6);
-          return curState;
-        default:
-          return null;
-      }
-    }
-    return null;
   }
 
   bool _checkAuCrc(AccessUnit unit) {
@@ -279,6 +251,10 @@ class TabularWeatherHandler extends DSIHandler {
     }
     _rfdCollector.start(meta);
     _rfdCollecting = true;
+    sxiLayer.appState.tabularWeatherState.beginTabularWeatherDbDownload(
+      expectedBytes: meta.expectedSize,
+      fileName: meta.fileName,
+    );
     logger.d(
         'TabularWeatherHandler: RFD: started collection for ${meta.fileName ?? '(no name)'} expectedSize=${meta.expectedSize}');
     return true;
@@ -309,6 +285,11 @@ class TabularWeatherHandler extends DSIHandler {
     final bool done =
         _rfdCollector.addBlockFromAu(chunk, headerLen: blockHeaderLen);
     final int total = _rfdCollector.current?.receivedSize ?? 0;
+    sxiLayer.appState.tabularWeatherState
+        .updateTabularWeatherDbDownloadProgress(
+      receivedBytes: total,
+      expectedBytes: expected,
+    );
     logger.t(
         'TabularWeatherHandler: RFD: chunk ${chunk.length} (fileId $hdrFileId) bytes, total $total${expected != null ? '/$expected' : ''}');
     if (done) {
@@ -318,27 +299,23 @@ class TabularWeatherHandler extends DSIHandler {
         logger.i(
             'TabularWeatherHandler: RFD: weather file downloaded (${fileBytes.length} bytes) preview=$preview');
 
-        // Print the bytes
-        logger.t('TabularWeatherHandler: RFD: weather file bytes: $fileBytes');
-
         // Parse the downloaded weather file
         try {
-          final parsed = WxTabParser.parse(fileBytes, fileName: null);
-          logger.i(
-              'TabularWeatherHandler: WxTab parsed: dbVersion=${parsed.dbVersion} fileVersion=${parsed.fileVersion} versionBits=${parsed.fileVersionBits} states=${parsed.states.length}');
-
-          if (parsed.states.isNotEmpty &&
-              parsed.states.first.entries.isNotEmpty) {
-            final int stateId = parsed.states.first.id;
-            final int locId = parsed.states.first.entries.first.index;
-            final rec = parseForecastFor(stateId, locId, chunk);
-            if (rec != null) {
-              logger.i(
-                  'TabularWeatherHandler: Forecast sample s=$stateId l=$locId event=${rec.eventCode} tempCur=${rec.tempCur?.toString() ?? 'n/a'}');
-            }
+          final String? fileName = _rfdCollector.current?.metadata.fileName;
+          sxiLayer.appState.tabularWeatherState
+              .updateTabularWeatherDatabaseBytes(fileBytes, fileName: fileName);
+          sxiLayer.appState.tabularWeatherState
+              .finishTabularWeatherDbDownload();
+          final parsed =
+              sxiLayer.appState.tabularWeatherState.hasTabularWeatherDb
+                  ? TabularWeatherParser.parse(fileBytes, fileName: fileName)
+                  : null;
+          if (parsed != null) {
+            logger.i(
+                'TabularWeatherHandler: TabularWeather parsed: dbVersion=${parsed.dbVersion} fileVersion=${parsed.fileVersion} versionBits=${parsed.fileVersionBits} states=${parsed.states.length}');
           }
         } catch (e) {
-          logger.w('TabularWeatherHandler: WxTab parse failed: $e');
+          logger.w('TabularWeatherHandler: TabularWeather parse failed: $e');
         }
         _rfdCollecting = false;
         _metadataProcessed = false;

@@ -1,5 +1,7 @@
 // Graphical Weather Handler
+import 'dart:collection';
 import 'dart:typed_data';
+import 'package:image/image.dart' as img;
 import 'package:orbit/data/data_handler.dart';
 import 'package:orbit/helpers.dart';
 import 'package:orbit/sxi_indication_types.dart';
@@ -9,16 +11,48 @@ import 'package:orbit/data/access_unit.dart';
 import 'package:orbit/data/bit_buffer.dart';
 import 'package:orbit/crc.dart';
 import 'package:orbit/data/radar_overlay.dart';
+import 'package:orbit/data/weather/graphical_weather_huffman.dart';
+import 'package:archive/archive.dart';
 
 class GraphicalWeatherHandler extends DSIHandler {
+  static const int _maxPlaybackFrames = 120;
+  static const Duration _capturedRetentionWindow = Duration(hours: 1);
+  static const double _suspiciousCoverageRejectThreshold = 0.995;
+  static const double _dominantIntensityRejectThreshold = 0.985;
+  static GraphicalWeatherHandler? _activeInstance;
+
   GraphicalWeatherHandler(SXiLayer sxiLayer)
-      : super(DataServiceIdentifier.sxmWeatherGraphical, sxiLayer);
+      : super(DataServiceIdentifier.sxmWeatherGraphical, sxiLayer) {
+    _activeInstance = this;
+  }
+
+  static GraphicalWeatherHandler? get activeInstance => _activeInstance;
+
+  // Reflectivity-style ramp
+  // [dBZ, R, G, B]
+  static const List<List<int>> _dbzStops = <List<int>>[
+    <int>[-20, 66, 79, 122],
+    <int>[-10, 66, 66, 102],
+    <int>[0, 84, 84, 84],
+    <int>[10, 0, 100, 0],
+    <int>[20, 0, 200, 0],
+    <int>[30, 130, 170, 0],
+    <int>[40, 248, 184, 0],
+    <int>[50, 232, 96, 48],
+    <int>[60, 208, 128, 240],
+    <int>[70, 160, 92, 208],
+  ];
+
+  static final List<List<List<int>>> _nowradPalettesRgba =
+      _buildNowradPalettesRgba();
+  final LinkedHashMap<int, RadarPlaybackFrame> _framesByTimestampMs =
+      LinkedHashMap<int, RadarPlaybackFrame>();
 
   @override
   void onAccessUnitComplete(AccessUnit unit) {
     final BitBuffer bitBuffer = BitBuffer(unit.getHeaderAndData());
     final int pvn = bitBuffer.readBits(4);
-    // WXAGW uses a 4-bit CARID field
+    // Use 4 bits for carousel ID
     final int carid = bitBuffer.readBits(4);
 
     if (pvn != 1) {
@@ -36,9 +70,10 @@ class GraphicalWeatherHandler extends DSIHandler {
     final int productTypeBit = b.readBits(1);
     final int productId = b.readBits(9);
     final bool isRaster = productTypeBit == 1;
-    final _WxTime tValid = _readGraphwxTime(b);
-    final _WxTime tIssued = _readGraphwxTime(b, yearHint: tValid.time.year);
-    final _WxMBR mbr = _readGraphwxMBR(b);
+    final _WeatherTime tValid = _readGraphicalWeatherTime(b);
+    final _WeatherTime tIssued =
+        _readGraphicalWeatherTime(b, yearHint: tValid.time.year);
+    final _WeatherMBR mbr = _readGraphicalWeatherMbr(b);
 
     if (b.hasError) {
       logger.w('GraphicalWeatherHandler: Header parse error');
@@ -65,15 +100,13 @@ class GraphicalWeatherHandler extends DSIHandler {
     logger.t(
         'GraphicalWeatherHandler: Product preview: ${_hexPreview(bodyView, 32)}');
 
-    if (productId == 1) {
-      // NOWRAD precipitation intensity raster (PID 1)
+    if (productId == 1 || productId == 130) {
+      // NOWRAD precipitation intensity raster
       final int width = rh.cols;
       final int height = rh.rows;
       final int pixelCount = width * height;
       final int planeCount = rh.planeCount;
-      final List<List<int>> planeAgg =
-          List<List<int>>.generate(planeCount, (_) => <int>[]);
-      final List<int> planeFilled = List<int>.filled(planeCount, 0);
+      final List<Uint8List> planeCandidates = <Uint8List>[];
       int safetyCounter = 0;
       while (b.remainingBytes > 0 && !b.hasError && safetyCounter < 64) {
         safetyCounter++;
@@ -88,21 +121,36 @@ class GraphicalWeatherHandler extends DSIHandler {
             ((len2 & 0xFF) << 16) |
             ((len3 & 0xFF) << 24);
         if (b.hasError) break;
-        if (sectionLength <= 0 || sectionLength > b.remainingBytes + 8) {
-          logger.w('GraphWX: invalid section length: $sectionLength');
+        if (icf > 5) {
+          logger.w(
+              'GraphicalWeather: skip invalid section icf=$icf type=$sectionType len=$sectionLength');
+          if (sectionLength > 0 && sectionLength <= b.remainingBytes) {
+            b.skipBits(sectionLength * 8);
+          } else {
+            break;
+          }
+          continue;
+        }
+        if (sectionType > 5) {
+          logger.w(
+              'GraphicalWeather: skip invalid section type icf=$icf type=$sectionType len=$sectionLength');
+          if (sectionLength > 0 && sectionLength <= b.remainingBytes) {
+            b.skipBits(sectionLength * 8);
+          } else {
+            break;
+          }
+          continue;
+        }
+        if (sectionLength <= 0 || sectionLength > b.remainingBytes) {
+          logger.w(
+              'GraphicalWeather: invalid section length=$sectionLength rem=${b.remainingBytes}');
           break;
         }
         final List<int> payload = b.readBytes(sectionLength);
         if (b.hasError) break;
 
         logger.t(
-            'GraphWX: section icf=$icf type=$sectionType len=$sectionLength');
-
-        // Skip probable zlib sections regardless of ICF
-        if (payload.length >= 2 && (payload[0] & 0xFF) == 0x78) {
-          logger.t('GraphWX: skipping zlib/deflate section');
-          continue;
-        }
+            'GraphicalWeather: section icf=$icf type=$sectionType len=$sectionLength');
 
         final List<int>? expanded = _expandByIcf(
           icf,
@@ -114,84 +162,138 @@ class GraphicalWeatherHandler extends DSIHandler {
         );
         if (expanded == null || expanded.isEmpty) {
           logger.w(
-              'GraphWX: section expand failed for type=$sectionType icf=$icf len=$sectionLength');
+              'GraphicalWeather: section expand failed for type=$sectionType icf=$icf len=$sectionLength');
           continue;
         }
-        // Use as plane index when in range, otherwise fall back to plane 0
-        final int dstPlane =
-            (sectionType >= 0 && sectionType < planeCount) ? sectionType : 0;
-        final List<int> dst = planeAgg[dstPlane];
-        final int needed = pixelCount - dst.length;
-        if (needed > 0) {
-          if (expanded.length <= needed) {
-            dst.addAll(expanded);
-            planeFilled[dstPlane] = dst.length;
-          } else {
-            dst.addAll(expanded.sublist(0, needed));
-            planeFilled[dstPlane] = dst.length;
-          }
-        }
-        // Stop when all planes are complete
-        bool allFull = true;
-        for (int pi = 0; pi < planeCount; pi++) {
-          if (planeAgg[pi].length < pixelCount) {
-            allFull = false;
-            break;
-          }
-        }
-        if (allFull) break;
+        // Treat each expanded section as a whole plane candidate
+        final Uint8List plane = expanded is Uint8List
+            ? expanded
+            : Uint8List.fromList(expanded.length > pixelCount
+                ? expanded.sublist(0, pixelCount)
+                : expanded);
+        planeCandidates.add(plane);
       }
 
-      // Select intensity plane, prefer plane 0, otherwise use the first full plane
-      List<int>? intensityPlane =
-          planeAgg.isNotEmpty && planeAgg[0].length >= pixelCount
-              ? planeAgg[0]
-              : null;
-      if (intensityPlane == null) {
-        for (int pi = 0; pi < planeCount; pi++) {
-          if (planeAgg[pi].length >= pixelCount) {
-            intensityPlane = planeAgg[pi];
-            break;
-          }
+      final _PlanePick pick =
+          _pickNowradPlanes(planeCandidates, expectedLen: pixelCount);
+      Uint8List? intensityPlane = pick.intensity;
+      Uint8List? classPlane = pick.cls;
+      if (intensityPlane != null && classPlane != null) {
+        logger.d(
+            'GraphicalWeather: selected planes intensityIdx=${pick.intensityIndex} classIdx=${pick.classIndex} classFallback=${pick.usedClassFallback} '
+            'intensity=[${_compactPlaneSummary(intensityPlane, expectedLen: pixelCount)}] '
+            'class=[${_compactPlaneSummary(classPlane, expectedLen: pixelCount)}]');
+      }
+
+      if (planeCandidates.isNotEmpty) {
+        for (int ci = 0; ci < planeCandidates.length; ci++) {
+          final p = planeCandidates[ci];
+          final _PlaneStats s = _planeStats(p, expectedLen: pixelCount);
+          final String guess = (s.maxV <= 2 && s.nonZero > pixelCount * 0.90)
+              ? 'classLike'
+              : (s.nonZero == 0)
+                  ? 'allZero'
+                  : (s.maxV > 2)
+                      ? 'intensityLike'
+                      : 'lowRange';
+          logger.t(
+              'GraphicalWeather: planeCandidate[$ci] len=${p.length} min=${s.minV} max=${s.maxV} nonZero=${s.nonZero} -> $guess');
         }
       }
+
       if (intensityPlane == null || intensityPlane.length < pixelCount) {
-        logger.w('GraphWX: missing NOWRAD intensity plane');
+        logger.w(
+            'GraphicalWeather: missing NOWRAD intensity plane (candidates=${planeCandidates.length}, planeCount=$planeCount)');
         return;
       }
-      final List<int>? classPlane =
-          (planeCount > 1 && planeAgg[1].length >= pixelCount)
-              ? planeAgg[1]
-              : null;
+
+      if (classPlane == null || classPlane.length < pixelCount) {
+        logger.w(
+            'GraphicalWeather: missing NOWRAD class plane (candidates=${planeCandidates.length}, planeCount=$planeCount)');
+        return;
+      }
+
+      if (pick.usedClassFallback) {
+        logger.w(
+            'GraphicalWeather: rejecting tile due to low-confidence class plane (fallback). '
+            'pid=$productId ts=${tValid.asString} candidates=${planeCandidates.length}');
+        return;
+      }
 
       // Build RGBA image using 3 palettes of 16 colors
       final List<List<List<int>>> palettes = _nowradPalettes();
-      final Uint8List rgba = Uint8List(pixelCount * 4);
+      final Uint8List rgbaRaw = Uint8List(pixelCount * 4);
+      int nonTransparentPixels = 0;
+      final List<int> intensityHistogram = List<int>.filled(16, 0);
+      final List<int> classHistogram = List<int>.filled(3, 0);
 
       for (int i = 0, p = 0; i < pixelCount; i++, p += 4) {
-        final int intensity = (intensityPlane[i] & 0xFF).clamp(0, 15);
-        final int classIndex =
-            classPlane != null ? (classPlane[i] & 0xFF).clamp(0, 2) : 0;
+        final int intensity = intensityPlane[i] & 0xFF;
+        final int classIndex = classPlane[i] & 0xFF;
+        // Invalid palette indices abort the tile
+        if (intensity > 0x0F || classIndex > 2) {
+          logger.w(
+              'GraphicalWeather: invalid radar palette index intensity=$intensity class=$classIndex');
+          return;
+        }
 
         // Transparent for zero intensity, otherwise use palette
         if (intensity == 0) {
-          rgba[p + 0] = 0;
-          rgba[p + 1] = 0;
-          rgba[p + 2] = 0;
-          rgba[p + 3] = 0;
+          rgbaRaw[p + 0] = 0;
+          rgbaRaw[p + 1] = 0;
+          rgbaRaw[p + 2] = 0;
+          rgbaRaw[p + 3] = 0;
+          intensityHistogram[0]++;
+          classHistogram[classIndex]++;
           continue;
         }
 
         final List<int> c = palettes[classIndex][intensity];
-        rgba[p + 0] = c[0] & 0xFF; // R
-        rgba[p + 1] = c[1] & 0xFF; // G
-        rgba[p + 2] = c[2] & 0xFF; // B
-        rgba[p + 3] = c[3] & 0xFF; // A
+        rgbaRaw[p + 0] = c[0] & 0xFF; // R
+        rgbaRaw[p + 1] = c[1] & 0xFF; // G
+        rgbaRaw[p + 2] = c[2] & 0xFF; // B
+        rgbaRaw[p + 3] = c[3] & 0xFF; // A
+        nonTransparentPixels++;
+        intensityHistogram[intensity]++;
+        classHistogram[classIndex]++;
+      }
+      final double nonTransparentRatio =
+          pixelCount <= 0 ? 0.0 : (nonTransparentPixels / pixelCount);
+      final int dominantIntensityCount = intensityHistogram
+          .skip(1)
+          .fold<int>(0, (prev, c) => c > prev ? c : prev);
+      final double dominantIntensityRatio =
+          pixelCount <= 0 ? 0.0 : (dominantIntensityCount / pixelCount);
+      if (nonTransparentRatio >= _suspiciousCoverageRejectThreshold &&
+          dominantIntensityRatio >= _dominantIntensityRejectThreshold) {
+        logger.w(
+            'GraphicalWeather: rejecting suspicious full-coverage tile coverage=${(nonTransparentRatio * 100).toStringAsFixed(1)}% '
+            'dominantIntensity=${(dominantIntensityRatio * 100).toStringAsFixed(1)}% '
+            'intensityHist=${_compactHistogram(intensityHistogram)} classHist=${_compactHistogram(classHistogram)} '
+            'pid=$productId ts=${tValid.asString}');
+        return;
+      }
+      if (nonTransparentRatio > 0.98 || pick.usedClassFallback) {
+        logger.w(
+            'GraphicalWeather: suspicious tile coverage=${(nonTransparentRatio * 100).toStringAsFixed(1)}% '
+            'classFallback=${pick.usedClassFallback} '
+            'intensityHist=${_compactHistogram(intensityHistogram)} '
+            'classHist=${_compactHistogram(classHistogram)}');
+      } else {
+        logger.d(
+            'GraphicalWeather: tile coverage=${(nonTransparentRatio * 100).toStringAsFixed(1)}% '
+            'intensityHist=${_compactHistogram(intensityHistogram)} '
+            'classHist=${_compactHistogram(classHistogram)}');
       }
 
+      // The previous orientation chain reduced to identity
+      final int outWidth = width;
+      final int outHeight = height;
+      final Uint8List rgba = rgbaRaw;
+
       final RadarOverlay overlay = RadarOverlay(
-        width: width,
-        height: height,
+        width: outWidth,
+        height: outHeight,
         rgba: rgba,
         minLat: mbr.minLat,
         minLon: mbr.minLon,
@@ -200,8 +302,124 @@ class GraphicalWeatherHandler extends DSIHandler {
       );
 
       sxiLayer.appState.addRadarOverlay(overlay, tValid.time);
-      logger.i('GraphicalWeatherHandler: NOWRAD tile added (${width}x$height)');
+      _capturePlaybackTile(overlay, tValid.time);
+      logger.i(
+          'GraphicalWeatherHandler: NOWRAD tile added (${outWidth}x$outHeight)');
     }
+  }
+
+  void _capturePlaybackTile(RadarOverlay overlay, DateTime timestamp) {
+    final DateTime tsUtc = timestamp.toUtc();
+    final int tsMs = tsUtc.millisecondsSinceEpoch;
+    final RadarPlaybackTile tile = RadarPlaybackTile(
+      pngBytes: _overlayToPng(overlay),
+      width: overlay.width,
+      height: overlay.height,
+      minLat: overlay.minLat,
+      minLon: overlay.minLon,
+      maxLat: overlay.maxLat,
+      maxLon: overlay.maxLon,
+    );
+    final RadarPlaybackFrame existing = _framesByTimestampMs[tsMs] ??
+        RadarPlaybackFrame(
+          timestampUtc: tsUtc,
+          tiles: <RadarPlaybackTile>[],
+          minLat: tile.minLat,
+          minLon: tile.minLon,
+          maxLat: tile.maxLat,
+          maxLon: tile.maxLon,
+        );
+    final List<RadarPlaybackTile> nextTiles =
+        List<RadarPlaybackTile>.from(existing.tiles)..add(tile);
+    _framesByTimestampMs[tsMs] = existing.copyWith(
+      tiles: nextTiles,
+      minLat: existing.minLat < tile.minLat ? existing.minLat : tile.minLat,
+      minLon: existing.minLon < tile.minLon ? existing.minLon : tile.minLon,
+      maxLat: existing.maxLat > tile.maxLat ? existing.maxLat : tile.maxLat,
+      maxLon: existing.maxLon > tile.maxLon ? existing.maxLon : tile.maxLon,
+    );
+    _enforcePlaybackFrameLimits();
+  }
+
+  List<RadarPlaybackTimelineEntry> capturedRadarTimelineEntries({
+    Duration? window,
+    bool includeInProgressLatest = true,
+  }) {
+    final Duration useWindow = window ?? _capturedRetentionWindow;
+    final DateTime nowUtc = DateTime.now().toUtc();
+    final int oldestAllowedMs =
+        nowUtc.subtract(useWindow).millisecondsSinceEpoch;
+    final Map<int, int> countByTsMs = <int, int>{
+      for (final entry in _framesByTimestampMs.entries)
+        if (entry.key >= oldestAllowedMs) entry.key: entry.value.tileCount,
+    };
+    if (countByTsMs.isEmpty) return <RadarPlaybackTimelineEntry>[];
+    final List<int> sorted = countByTsMs.keys.toList()..sort();
+    final int latestTsMs = sorted.last;
+    int inferredCompleteTiles = countByTsMs[sorted.first] ?? 0;
+    for (final int tsMs in sorted) {
+      if (tsMs == latestTsMs) continue;
+      final int c = countByTsMs[tsMs] ?? 0;
+      if (c > inferredCompleteTiles) inferredCompleteTiles = c;
+    }
+
+    final List<RadarPlaybackTimelineEntry> entries =
+        <RadarPlaybackTimelineEntry>[];
+    for (final int tsMs in sorted) {
+      final DateTime ts =
+          DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true);
+      final int tileCount = countByTsMs[tsMs] ?? 0;
+      final bool isLatest = tsMs == latestTsMs;
+      final bool isComplete = !isLatest ||
+          (inferredCompleteTiles > 0 && tileCount >= inferredCompleteTiles);
+      if (!includeInProgressLatest && isLatest && !isComplete) {
+        continue;
+      }
+      entries.add(RadarPlaybackTimelineEntry(
+        timestampUtc: ts,
+        tileCount: tileCount,
+        inferredCompleteTileCount:
+            inferredCompleteTiles > 0 ? inferredCompleteTiles : tileCount,
+        isComplete: isComplete,
+        isLatest: isLatest,
+      ));
+    }
+    return entries;
+  }
+
+  List<DateTime> capturedPlayableRadarTimestamps({Duration? window}) {
+    return capturedRadarTimelineEntries(
+      window: window,
+      includeInProgressLatest: false,
+    ).map((e) => e.timestampUtc).toList(growable: false);
+  }
+
+  RadarPlaybackFrame? frameForTimestamp(DateTime timestamp) {
+    return _framesByTimestampMs[timestamp.toUtc().millisecondsSinceEpoch];
+  }
+
+  int get cachedPlaybackFrameCount => _framesByTimestampMs.length;
+
+  void _enforcePlaybackFrameLimits() {
+    final Duration retention = _capturedRetentionWindow;
+    final DateTime nowUtc = DateTime.now().toUtc();
+    final int oldestAllowedMs =
+        nowUtc.subtract(retention).millisecondsSinceEpoch;
+    _framesByTimestampMs.removeWhere((tsMs, _) => tsMs < oldestAllowedMs);
+
+    while (_framesByTimestampMs.length > _maxPlaybackFrames) {
+      _framesByTimestampMs.remove(_framesByTimestampMs.keys.first);
+    }
+  }
+
+  Uint8List _overlayToPng(RadarOverlay o) {
+    final img.Image image = img.Image.fromBytes(
+      width: o.width,
+      height: o.height,
+      bytes: o.rgba.buffer,
+      order: img.ChannelOrder.rgba,
+    );
+    return Uint8List.fromList(img.encodePng(image));
   }
 
   String _hexPreview(List<int> bytes, int maxLen) {
@@ -211,7 +429,7 @@ class GraphicalWeatherHandler extends DSIHandler {
     return hex + (bytes.length > n ? ' …' : '');
   }
 
-  _WxTime _readGraphwxTime(BitBuffer b, {int? yearHint}) {
+  _WeatherTime _readGraphicalWeatherTime(BitBuffer b, {int? yearHint}) {
     final int month = b.readBits(4) & 0xF;
     final int day = b.readBits(5) & 0x1F;
     final int hour = b.readBits(5) & 0x1F;
@@ -222,9 +440,9 @@ class GraphicalWeatherHandler extends DSIHandler {
         day > 31 ||
         hour > 23 ||
         minute >= 60) {
-      logger
-          .t('GraphWX: invalid time fields m=$month d=$day h=$hour m=$minute');
-      return _WxTime(DateTime.fromMillisecondsSinceEpoch(0, isUtc: true));
+      logger.t(
+          'GraphicalWeather: invalid time fields m=$month d=$day h=$hour m=$minute');
+      return _WeatherTime(DateTime.fromMillisecondsSinceEpoch(0, isUtc: true));
     }
     int year;
     if (yearHint != null && yearHint != 0xFFFF) {
@@ -242,14 +460,14 @@ class GraphicalWeatherHandler extends DSIHandler {
       }
     }
     try {
-      return _WxTime(DateTime.utc(year, month, day, hour, minute));
+      return _WeatherTime(DateTime.utc(year, month, day, hour, minute));
     } catch (_) {
-      logger.w('GraphWX: failed to parse time, using default 0');
-      return _WxTime(DateTime.fromMillisecondsSinceEpoch(0, isUtc: true));
+      logger.w('GraphicalWeather: failed to parse time, using default 0');
+      return _WeatherTime(DateTime.fromMillisecondsSinceEpoch(0, isUtc: true));
     }
   }
 
-  _WxMBR _readGraphwxMBR(BitBuffer b) {
+  _WeatherMBR _readGraphicalWeatherMbr(BitBuffer b) {
     final int lat1 = unsignedToSignedInt(b.readBits(15), 15);
     final int lon0 = unsignedToSignedInt(b.readBits(16), 16);
     final int lat0 = unsignedToSignedInt(b.readBits(15), 15);
@@ -266,7 +484,7 @@ class GraphicalWeatherHandler extends DSIHandler {
     final double lat0d = lat0 / 100.0;
     final double lat1d = lat1 / 100.0;
 
-    return _WxMBR(
+    return _WeatherMBR(
       lat0d < lat1d ? lat0d : lat1d,
       lon0d,
       lat0d < lat1d ? lat1d : lat0d,
@@ -278,98 +496,282 @@ class GraphicalWeatherHandler extends DSIHandler {
       {int? expectedLen, int? targetCols, int? targetRows, int? sectionType}) {
     try {
       switch (icf) {
+        case 0:
+          // Raw/copy section
+          return payload;
+        case 1:
+          // Deflate section
+          {
+            if (payload.length < 2) return null;
+            if ((payload[0] & 0xFF) != 0x78) return null;
+            final List<int> inflated = ZLibDecoder().decodeBytes(payload);
+            return inflated;
+          }
         case 2:
           {
-            // TODO: Implement Weather-Huffman decode
-            return null;
+            // ICF 2 with sectionType 2 uses deflate, otherwise use Weather-Huffman
+            if (sectionType == 2) {
+              if (payload.length < 2) return null;
+              if ((payload[0] & 0xFF) != 0x78) return null;
+              return ZLibDecoder().decodeBytes(payload);
+            }
+
+            final int cols = targetCols ?? 0;
+            final int rows = targetRows ?? 0;
+            if (cols <= 0 || rows <= 0) return null;
+
+            final Uint8List? plane = GraphicalWeatherHuffman.decode(
+              payload: payload,
+              targetCols: cols,
+              targetRows: rows,
+            );
+
+            if (plane == null) return null;
+            if (plane.isNotEmpty) {
+              int minV = 255;
+              int maxV = 0;
+              for (final v in plane) {
+                final int vv = v & 0xFF;
+                if (vv < minV) minV = vv;
+                if (vv > maxV) maxV = vv;
+              }
+              logger.t(
+                  'GraphicalWeather: ICF=2 decoded plane len=${plane.length} min=$minV max=$maxV type=$sectionType');
+            }
+            if (expectedLen != null && expectedLen > 0) {
+              if (plane.length != expectedLen) {
+                logger.w(
+                    'GraphicalWeather: ICF=2 decode length mismatch got=${plane.length} expected=$expectedLen (type=$sectionType)');
+              }
+            }
+            return plane;
+          }
+        case 3:
+          // Nibble-RLE (no deflate)
+          return _expandNibbleRunLengthEncoded(payload);
+        case 4:
+          // Deflate and then nibble-RLE
+          {
+            if (payload.length < 2) return null;
+            if ((payload[0] & 0xFF) != 0x78) return null;
+            final List<int> inflated = ZLibDecoder().decodeBytes(payload);
+            if (inflated.isEmpty) return null;
+            return _expandNibbleRunLengthEncoded(inflated);
+          }
+        case 5:
+          // Skip 5-byte preheader, deflate, nibble-RLE
+          {
+            if (payload.length < 7) return null;
+            final List<int> body = payload.sublist(5);
+            if ((body[0] & 0xFF) != 0x78) return null;
+            final List<int> inflated = ZLibDecoder().decodeBytes(body);
+            if (inflated.isEmpty) return null;
+            return _expandNibbleRunLengthEncoded(inflated);
           }
         default:
           // Don't care about the others
           return null;
       }
     } catch (e) {
-      logger.w('GraphWX: Section expand failed icf=$icf: $e');
+      logger.w('GraphicalWeather: Section expand failed icf=$icf: $e');
       return null;
     }
   }
 
-  // Approximate NOWRAD palettes, 3 sets x 16 RGBA entries, index 0 is transparent
-  // Palette 0: default, palette 1/2: slight hue shifts
+  List<int> _expandNibbleRunLengthEncoded(List<int> src) {
+    final List<int> out = <int>[];
+    int hiNibblePrefix = 0;
+    for (int i = 0; i < src.length; i++) {
+      final int b = src[i] & 0xFF;
+      final int hi = (b >> 4) & 0xF;
+      final int lo = b & 0xF;
+      if (b < 0xD0) {
+        final int run = hi + 1;
+        final int v = (hiNibblePrefix | lo) & 0xFF;
+        for (int k = 0; k < run; k++) {
+          out.add(v);
+        }
+        continue;
+      }
+      if (hi == 0xF) {
+        hiNibblePrefix = (b << 4) & 0xFF;
+        continue;
+      }
+      int run = 0;
+      if (hi == 0xE) {
+        if (i + 1 >= src.length) break;
+        run = src[++i] & 0xFF;
+      } else if (hi == 0xD) {
+        if (i + 2 >= src.length) break;
+        run = (src[i + 1] & 0xFF) | ((src[i + 2] & 0xFF) << 8);
+        i += 2;
+      } else {
+        continue;
+      }
+      final int v = (hiNibblePrefix | lo) & 0xFF;
+      for (int k = 0; k < run + 1; k++) {
+        out.add(v);
+      }
+    }
+    return out;
+  }
+
+  // 3 classes x 16 entries, intensity 0 is transparent
   List<List<List<int>>> _nowradPalettes() {
-    List<List<int>> base = <List<int>>[
-      [0, 0, 0, 0],
-      [0, 233, 0, 200],
-      [16, 213, 0, 210],
-      [32, 193, 0, 220],
-      [64, 173, 0, 230],
-      [96, 153, 0, 240],
-      [128, 133, 0, 250],
-      [160, 128, 0, 255],
-      [192, 112, 0, 255],
-      [224, 96, 0, 255],
-      [240, 64, 0, 255],
-      [248, 0, 0, 255],
-      [216, 0, 96, 255],
-      [184, 0, 160, 255],
-      [208, 80, 192, 255],
-      [240, 240, 240, 255],
-    ];
+    return _nowradPalettesRgba;
+  }
 
-    // Variant palettes with subtle hue shifts
-    List<List<int>> variant1 = <List<int>>[
-      [0, 0, 0, 0],
-      [0, 225, 32, 200],
-      [0, 205, 48, 210],
-      [0, 185, 64, 220],
-      [0, 165, 96, 230],
-      [0, 145, 128, 240],
-      [0, 125, 160, 250],
-      [0, 105, 192, 255],
-      [0, 85, 224, 255],
-      [0, 64, 240, 255],
-      [0, 0, 248, 255],
-      [64, 0, 216, 255],
-      [112, 0, 184, 255],
-      [160, 0, 160, 255],
-      [208, 64, 192, 255],
-      [240, 240, 240, 255],
-    ];
+  static List<List<List<int>>> _buildNowradPalettesRgba() {
+    final List<List<List<int>>> out = List<List<List<int>>>.generate(
+      3,
+      (_) => List<List<int>>.generate(16, (_) => <int>[0, 0, 0, 0]),
+    );
 
-    List<List<int>> variant2 = <List<int>>[
-      [0, 0, 0, 0],
-      [32, 225, 0, 200],
-      [64, 205, 0, 210],
-      [96, 185, 0, 220],
-      [128, 165, 0, 230],
-      [160, 145, 0, 240],
-      [192, 125, 0, 250],
-      [208, 105, 0, 255],
-      [224, 85, 0, 255],
-      [240, 64, 0, 255],
-      [248, 0, 0, 255],
-      [232, 0, 96, 255],
-      [216, 0, 160, 255],
-      [224, 48, 192, 255],
-      [240, 96, 224, 255],
-      [255, 255, 255, 255],
-    ];
+    for (int classIndex = 0; classIndex < 3; classIndex++) {
+      out[classIndex][0] = <int>[0, 0, 0, 0];
+      for (int intensity = 0; intensity < 16; intensity++) {
+        if (intensity == 0) continue;
+        final double dbz = -20.0 + ((intensity - 1) * (90.0 / 14.0));
+        final List<int> rgb = _sampleReflectivityRgb(dbz);
+        out[classIndex][intensity] = <int>[rgb[0], rgb[1], rgb[2], 255];
+      }
+    }
 
-    return <List<List<int>>>[base, variant1, variant2];
+    return out;
+  }
+
+  static List<int> _sampleReflectivityRgb(double dbz) {
+    if (dbz <= _dbzStops.first[0]) {
+      return _boostPaletteVisibility(_dbzStops.first.sublist(1, 4));
+    }
+    for (int i = 1; i < _dbzStops.length; i++) {
+      final List<int> a = _dbzStops[i - 1];
+      final List<int> b = _dbzStops[i];
+      final double da = a[0].toDouble();
+      final double db = b[0].toDouble();
+      if (dbz <= db) {
+        final double t = (dbz - da) / (db - da);
+        int lerp(int x, int y) => (x + ((y - x) * t)).round().clamp(0, 255);
+        return _boostPaletteVisibility(<int>[
+          lerp(a[1], b[1]),
+          lerp(a[2], b[2]),
+          lerp(a[3], b[3]),
+        ]);
+      }
+    }
+    return _boostPaletteVisibility(_dbzStops.last.sublist(1, 4));
+  }
+
+  static List<int> _boostPaletteVisibility(List<int> rgb) {
+    final double r = rgb[0].toDouble();
+    final double g = rgb[1].toDouble();
+    final double b = rgb[2].toDouble();
+
+    // Slight saturation and brightness lift for better visibility
+    final double luma = (0.299 * r) + (0.587 * g) + (0.114 * b);
+    int adj(double c) {
+      final double saturated = luma + ((c - luma) * 1.18);
+      final double brightened = (saturated * 1.06) + 10.0;
+      return brightened.round().clamp(0, 255);
+    }
+
+    return <int>[adj(r), adj(g), adj(b)];
   }
 }
 
-class _WxTime {
+class _WeatherTime {
   final DateTime time;
-  _WxTime(this.time);
+  _WeatherTime(this.time);
   String get asString => time.toIso8601String();
 }
 
-class _WxMBR {
+class RadarPlaybackFrame {
+  final DateTime timestampUtc;
+  final List<RadarPlaybackTile> tiles;
   final double minLat;
   final double minLon;
   final double maxLat;
   final double maxLon;
-  _WxMBR(this.minLat, this.minLon, this.maxLat, this.maxLon);
+
+  RadarPlaybackFrame({
+    required DateTime timestampUtc,
+    required this.tiles,
+    required this.minLat,
+    required this.minLon,
+    required this.maxLat,
+    required this.maxLon,
+  }) : timestampUtc = timestampUtc.toUtc();
+
+  int get tileCount => tiles.length;
+
+  RadarPlaybackFrame copyWith({
+    DateTime? timestampUtc,
+    List<RadarPlaybackTile>? tiles,
+    double? minLat,
+    double? minLon,
+    double? maxLat,
+    double? maxLon,
+  }) {
+    return RadarPlaybackFrame(
+      timestampUtc: timestampUtc ?? this.timestampUtc,
+      tiles: tiles ?? this.tiles,
+      minLat: minLat ?? this.minLat,
+      minLon: minLon ?? this.minLon,
+      maxLat: maxLat ?? this.maxLat,
+      maxLon: maxLon ?? this.maxLon,
+    );
+  }
+}
+
+class RadarPlaybackTile {
+  final Uint8List pngBytes;
+  final int width;
+  final int height;
+  final double minLat;
+  final double minLon;
+  final double maxLat;
+  final double maxLon;
+
+  const RadarPlaybackTile({
+    required this.pngBytes,
+    required this.width,
+    required this.height,
+    required this.minLat,
+    required this.minLon,
+    required this.maxLat,
+    required this.maxLon,
+  });
+}
+
+class RadarPlaybackTimelineEntry {
+  final DateTime timestampUtc;
+  final int tileCount;
+  final int inferredCompleteTileCount;
+  final bool isComplete;
+  final bool isLatest;
+
+  RadarPlaybackTimelineEntry({
+    required DateTime timestampUtc,
+    required this.tileCount,
+    required this.inferredCompleteTileCount,
+    required this.isComplete,
+    required this.isLatest,
+  }) : timestampUtc = timestampUtc.toUtc();
+
+  double get progress {
+    final int denom =
+        inferredCompleteTileCount <= 0 ? 1 : inferredCompleteTileCount;
+    final double ratio = tileCount / denom;
+    return ratio.clamp(0.0, 1.0);
+  }
+}
+
+class _WeatherMBR {
+  final double minLat;
+  final double minLon;
+  final double maxLat;
+  final double maxLon;
+  _WeatherMBR(this.minLat, this.minLon, this.maxLat, this.maxLon);
   String get asString => '[Lat [$minLat -> $maxLat] Lon [$minLon -> $maxLon]]';
 }
 
@@ -388,6 +790,130 @@ class _RasterHeader {
     required this.precisions,
     required this.offsets,
   });
+}
+
+class _PlanePick {
+  final Uint8List? intensity;
+  final Uint8List? cls;
+  final int intensityIndex;
+  final int classIndex;
+  final bool usedClassFallback;
+  const _PlanePick({
+    required this.intensity,
+    required this.cls,
+    required this.intensityIndex,
+    required this.classIndex,
+    required this.usedClassFallback,
+  });
+}
+
+class _PlaneStats {
+  final int minV;
+  final int maxV;
+  final int nonZero;
+  const _PlaneStats(
+      {required this.minV, required this.maxV, required this.nonZero});
+}
+
+_PlaneStats _planeStats(Uint8List p, {required int expectedLen}) {
+  if (p.isEmpty || expectedLen <= 0) {
+    return const _PlaneStats(minV: 0, maxV: 0, nonZero: 0);
+  }
+  final int n = p.length < expectedLen ? p.length : expectedLen;
+  int minV = 255;
+  int maxV = 0;
+  int nonZero = 0;
+  for (int i = 0; i < n; i++) {
+    final int v = p[i] & 0xFF;
+    if (v != 0) nonZero++;
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  }
+  if (n == 0) minV = 0;
+  return _PlaneStats(minV: minV, maxV: maxV, nonZero: nonZero);
+}
+
+_PlanePick _pickNowradPlanes(List<Uint8List> candidates,
+    {required int expectedLen}) {
+  if (candidates.isEmpty) {
+    return const _PlanePick(
+      intensity: null,
+      cls: null,
+      intensityIndex: -1,
+      classIndex: -1,
+      usedClassFallback: false,
+    );
+  }
+
+  // Pick strongest-range plane as intensity
+  Uint8List? bestIntensity;
+  int bestIntensityIndex = -1;
+  int bestIntensityMax = -1;
+  int bestIntensityNonZero = -1;
+
+  for (int i = 0; i < candidates.length; i++) {
+    final p = candidates[i];
+    if (p.length < expectedLen) continue;
+    final _PlaneStats s = _planeStats(p, expectedLen: expectedLen);
+    if (s.maxV > bestIntensityMax ||
+        (s.maxV == bestIntensityMax && s.nonZero > bestIntensityNonZero)) {
+      bestIntensity = p;
+      bestIntensityIndex = i;
+      bestIntensityMax = s.maxV;
+      bestIntensityNonZero = s.nonZero;
+    }
+  }
+
+  Uint8List? bestClass;
+  int bestClassIndex = -1;
+  bool usedClassFallback = false;
+  int bestClassNonZero = -1;
+  for (int i = 0; i < candidates.length; i++) {
+    final p = candidates[i];
+    if (p.length < expectedLen) continue;
+    if (bestIntensity != null && identical(p, bestIntensity)) continue;
+    final _PlaneStats s = _planeStats(p, expectedLen: expectedLen);
+    if (s.maxV <= 2 && s.nonZero > bestClassNonZero) {
+      bestClass = p;
+      bestClassIndex = i;
+      bestClassNonZero = s.nonZero;
+    }
+  }
+
+  // Reject low-confidence class planes
+  usedClassFallback = bestClass == null;
+
+  return _PlanePick(
+    intensity: bestIntensity,
+    cls: bestClass,
+    intensityIndex: bestIntensityIndex,
+    classIndex: bestClassIndex,
+    usedClassFallback: usedClassFallback,
+  );
+}
+
+String _compactPlaneSummary(Uint8List p, {required int expectedLen}) {
+  final _PlaneStats s = _planeStats(p, expectedLen: expectedLen);
+  final int n = p.length < expectedLen ? p.length : expectedLen;
+  int distinct = 0;
+  final Set<int> seen = <int>{};
+  for (int i = 0; i < n; i++) {
+    seen.add(p[i] & 0xFF);
+    if (seen.length > 6) break;
+  }
+  distinct = seen.length;
+  final double ratio = n <= 0 ? 0.0 : (s.nonZero / n);
+  return 'min=${s.minV} max=${s.maxV} nonZero=${(ratio * 100).toStringAsFixed(1)}% distinct~$distinct';
+}
+
+String _compactHistogram(List<int> hist) {
+  final List<String> parts = <String>[];
+  for (int i = 0; i < hist.length; i++) {
+    final int c = hist[i];
+    if (c <= 0) continue;
+    parts.add('$i:$c');
+  }
+  return parts.isEmpty ? 'empty' : parts.join(',');
 }
 
 _RasterHeader _readRasterHeader(BitBuffer b) {

@@ -81,3 +81,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icon/icon.png
+    - assets/maps/usa_simplified.geojson

@@ -28,6 +28,7 @@ import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/signal_bar.dart';
 import 'package:orbit/ui/streaming_beta.dart';
 import 'package:orbit/ui/channel_logo_image.dart';
+import 'package:orbit/ui/weather_dialog.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/sxi_indication_types.dart';
@@ -674,6 +675,18 @@ class SettingsPage extends StatelessWidget {
                     'Choose which data services to monitor',
                     Icons.tune,
                     onTap: () => _showDataServicesPicker(context, appState),
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Weather',
+                    'Forecast, radar, and alerts',
+                    Icons.cloud_outlined,
+                    onTap: () {
+                      WeatherDialog.show(
+                        context,
+                        tabularWeatherState: appState.tabularWeatherState,
+                      );
+                    },
                   ),
                   _buildSettingTile(
                     context,

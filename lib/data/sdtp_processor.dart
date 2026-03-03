@@ -8,6 +8,7 @@ import 'package:orbit/data/handlers/movie_times_handler.dart';
 import 'package:orbit/data/handlers/program_guide_handler.dart';
 import 'package:orbit/data/handlers/tabular_weather_handler.dart';
 import 'package:orbit/data/handlers/graphical_weather_handler.dart';
+import 'package:orbit/data/handlers/weather_alerts_handler.dart';
 import 'package:orbit/data/handlers/unhandled_handler.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/data/sdtp.dart';
@@ -43,6 +44,8 @@ class SDTPProcessor {
               TabularWeatherHandler(sxiLayer),
           DataServiceIdentifier.sxmWeatherGraphical.value:
               GraphicalWeatherHandler(sxiLayer),
+          DataServiceIdentifier.sxmWeatherAlerts.value:
+              WeatherAlertsHandler(sxiLayer),
           DataServiceIdentifier.fuelPrices.value: FuelHandler(sxiLayer),
           DataServiceIdentifier.none.value: UnhandledHandler(sxiLayer),
         };

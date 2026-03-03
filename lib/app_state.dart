@@ -19,6 +19,7 @@ import 'package:orbit/data/favorite.dart';
 import 'package:orbit/data/favorites_on_air_entry.dart';
 import 'package:orbit/data/favorite_on_air_event.dart';
 import 'package:orbit/data/radar_overlay.dart';
+import 'package:orbit/data/weather/tabular_weather_state.dart';
 import 'package:orbit/debug_tools_stub.dart'
     if (dart.library.io) 'package:orbit/debug_tools.dart';
 
@@ -197,7 +198,13 @@ class AppState extends ChangeNotifier {
       ValueNotifier<RadarOverlay?>(null);
   final ValueNotifier<List<RadarOverlay>> radarOverlaysNotifier =
       ValueNotifier<List<RadarOverlay>>(<RadarOverlay>[]);
+  final ValueNotifier<Map<RadarOverlay, DateTime>>
+      radarOverlayTimestampsNotifier =
+      ValueNotifier<Map<RadarOverlay, DateTime>>(<RadarOverlay, DateTime>{});
   DateTime? _currentRadarTimestamp;
+  DateTime? get currentRadarTimestamp => _currentRadarTimestamp;
+
+  final TabularWeatherState tabularWeatherState = TabularWeatherState();
 
   List<FavoriteOnAirEntry> get favoritesOnAirEntries =>
       List<FavoriteOnAirEntry>.unmodifiable(_favoritesOnAirEntries);
@@ -1159,6 +1166,9 @@ class AppState extends ChangeNotifier {
   void dispose() {
     _cancelUpdateTimers();
     try {
+      tabularWeatherState.dispose();
+    } catch (_) {}
+    try {
       playbackInfoNotifier.dispose();
     } catch (_) {}
     try {
@@ -1301,16 +1311,24 @@ class AppState extends ChangeNotifier {
         !_isSameTimestamp(timestamp, _currentRadarTimestamp!)) {
       _currentRadarTimestamp = timestamp;
       radarOverlaysNotifier.value = <RadarOverlay>[overlay];
+      radarOverlayTimestampsNotifier.value = <RadarOverlay, DateTime>{
+        overlay: timestamp,
+      };
     } else {
       final List<RadarOverlay> next =
           List<RadarOverlay>.from(radarOverlaysNotifier.value)..add(overlay);
       radarOverlaysNotifier.value = next;
+      final Map<RadarOverlay, DateTime> nextTimes =
+          Map<RadarOverlay, DateTime>.from(radarOverlayTimestampsNotifier.value)
+            ..[overlay] = timestamp;
+      radarOverlayTimestampsNotifier.value = nextTimes;
     }
     notifyListeners();
   }
 
   void clearRadarOverlays() {
     radarOverlaysNotifier.value = <RadarOverlay>[];
+    radarOverlayTimestampsNotifier.value = <RadarOverlay, DateTime>{};
     _currentRadarTimestamp = null;
     notifyListeners();
   }
