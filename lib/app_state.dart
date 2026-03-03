@@ -347,24 +347,37 @@ class AppState extends ChangeNotifier {
       await FrameTracer.instance.setEnabled(linkTraceEnabled);
     } catch (_) {}
 
+    final List<int> defaultMonitoredValues = <int>[
+      DataServiceIdentifier.albumArt.value,
+      DataServiceIdentifier.channelGraphicsUpdates.value,
+    ];
+
     final List<dynamic> monitoredList = await storageData.load(
-      SaveDataType.monitoredDataServices,
-      defaultValue: <int>[],
+      SaveDataType.monitoredDSI,
+      defaultValue: defaultMonitoredValues,
     );
 
     // Load monitored data services
+    final Set<DataServiceIdentifier> parsedServices = monitoredList
+        .whereType<int>()
+        .map(_dataServiceIdentifierOrNone)
+        .where((e) => e != DataServiceIdentifier.none)
+        .toSet();
+    final Set<DataServiceIdentifier> fallbackServices = <DataServiceIdentifier>{
+      DataServiceIdentifier.albumArt,
+      DataServiceIdentifier.channelGraphicsUpdates,
+    };
+    final Set<DataServiceIdentifier> servicesToStore =
+        parsedServices.isEmpty ? fallbackServices : parsedServices;
+
     monitoredDataServices
       ..clear()
-      ..addAll(monitoredList
-          .map((e) => e is int ? e : int.tryParse(e.toString()) ?? -1)
-          .where((v) => v >= 0)
-          .map((v) {
-        try {
-          return DataServiceIdentifier.getByValue(v);
-        } catch (_) {
-          return DataServiceIdentifier.none;
-        }
-      }).where((e) => e != DataServiceIdentifier.none));
+      ..addAll(servicesToStore);
+
+    await storageData.save(
+      SaveDataType.monitoredDSI,
+      servicesToStore.map((e) => e.value).toList(),
+    );
 
     // Load theme and UI scale
     final int themeModeIndex = await storageData.load(
@@ -866,8 +879,16 @@ class AppState extends ChangeNotifier {
       ..clear()
       ..addAll(services);
     final List<int> values = services.map((e) => e.value).toList();
-    storageData.save(SaveDataType.monitoredDataServices, values);
+    storageData.save(SaveDataType.monitoredDSI, values);
     notifyListeners();
+  }
+
+  DataServiceIdentifier _dataServiceIdentifierOrNone(int value) {
+    try {
+      return DataServiceIdentifier.getByValue(value);
+    } catch (_) {
+      return DataServiceIdentifier.none;
+    }
   }
 
   void resetEqValues() {

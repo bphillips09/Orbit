@@ -674,7 +674,8 @@ class SettingsPage extends StatelessWidget {
                     'Monitor Data Services',
                     'Choose which data services to monitor',
                     Icons.tune,
-                    onTap: () => _showDataServicesPicker(context, appState),
+                    onTap: () =>
+                        _showDataServiceMonitorDialog(context, appState),
                   ),
                   _buildSettingTile(
                     context,
@@ -824,22 +825,6 @@ class SettingsPage extends StatelessWidget {
                     },
                   ),
                   _buildSettingTile(
-                      context,
-                      'Monitor All Data Services',
-                      'Monitor all data services (this will take a few seconds)',
-                      Icons.monitor, onTap: () async {
-                    for (var val in DataServiceIdentifier.values) {
-                      if (val != DataServiceIdentifier.none) {
-                        mainPage.deviceLayer.sendControlCommand(
-                            SXiMonitorDataServiceCommand(
-                                DataServiceMonitorUpdateType
-                                    .startMonitorForService,
-                                val));
-                        await Future.delayed(const Duration(milliseconds: 500));
-                      }
-                    }
-                  }),
-                  _buildSettingTile(
                     context,
                     'Clear Radar Data',
                     'Delete saved radar tiles and raw dumps',
@@ -854,19 +839,6 @@ class SettingsPage extends StatelessWidget {
                           duration: const Duration(seconds: 2),
                         ));
                       }
-                    },
-                  ),
-                  _buildSettingTile(
-                    context,
-                    'Stop Monitoring Data Services',
-                    'Stop monitoring data services',
-                    Icons.stop,
-                    onTap: () {
-                      mainPage.deviceLayer.sendControlCommand(
-                          SXiMonitorDataServiceCommand(
-                              DataServiceMonitorUpdateType
-                                  .stopMonitorForAllServices,
-                              DataServiceIdentifier.none));
                     },
                   ),
                   _buildSettingTile(
@@ -920,85 +892,73 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  void _showDataServicesPicker(BuildContext context, AppState appState) {
-    final Set<DataServiceIdentifier> working =
-        Set<DataServiceIdentifier>.from(appState.monitoredDataServices);
+  void _showDataServiceMonitorDialog(BuildContext context, AppState appState) {
+    final monitorable = DataServiceIdentifier.values
+        .where((d) => d != DataServiceIdentifier.none)
+        .toList()
+      ..sort((a, b) =>
+          a.toString().toLowerCase().compareTo(b.toString().toLowerCase()));
 
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, setState) {
-          return AlertDialog(
-            title: const Text('Select Data Services'),
-            content: SizedBox(
-              width: 600,
-              height: 420,
-              child: SingleChildScrollView(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final d in DataServiceIdentifier.values)
-                      if (d != DataServiceIdentifier.none)
-                        FilterChip(
-                          label: Text(
-                              '${d.name} (0x${d.value.toRadixString(16).toUpperCase()})'),
-                          selected: working.contains(d),
-                          onSelected: (sel) {
-                            setState(() {
-                              if (sel) {
-                                working.add(d);
-                              } else {
-                                working.remove(d);
-                              }
-                            });
-                          },
-                        ),
-                  ],
-                ),
-              ),
+        return AlertDialog(
+          title: const Text('Monitor Data Services'),
+          content: SizedBox(
+            width: 620,
+            height: min(560, MediaQuery.of(ctx).size.height * 0.75),
+            child: Consumer<AppState>(
+              builder: (context, liveState, _) {
+                return ListView.builder(
+                  itemCount: monitorable.length,
+                  itemBuilder: (context, index) {
+                    final dsiName = monitorable[index];
+                    return SwitchListTile(
+                      title: Text(dsiName.name),
+                      value: liveState.monitoredDataServices.contains(dsiName),
+                      onChanged: (enabled) => _toggleDataServiceMonitoring(
+                          liveState, dsiName, enabled),
+                    );
+                  },
+                );
+              },
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () {
-                  final previous = Set<DataServiceIdentifier>.from(
-                      appState.monitoredDataServices);
-                  appState.updateMonitoredDataServices(working);
-                  // Send monitor commands for changes
-                  _applyDataServiceMonitoring(previous, working);
-                  Navigator.of(ctx).pop();
-                },
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        });
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
       },
     );
   }
 
-  void _applyDataServiceMonitoring(Set<DataServiceIdentifier> previous,
-      Set<DataServiceIdentifier> selected) {
-    final toStart = selected.difference(previous);
-    final toStop = previous.difference(selected);
-    for (final d in toStart) {
-      final cfgCmd = SXiMonitorDataServiceCommand(
-        DataServiceMonitorUpdateType.startMonitorForService,
-        d,
-      );
-      mainPage.deviceLayer.sendControlCommand(cfgCmd);
+  void _toggleDataServiceMonitoring(
+      AppState appState, DataServiceIdentifier dsi, bool enabled) {
+    final Set<DataServiceIdentifier> updated =
+        Set<DataServiceIdentifier>.from(appState.monitoredDataServices);
+    final alreadyEnabled = updated.contains(dsi);
+    if (alreadyEnabled == enabled) {
+      return;
     }
-    for (final d in toStop) {
-      final cfgCmd = SXiMonitorDataServiceCommand(
-        DataServiceMonitorUpdateType.stopMonitorForService,
-        d,
-      );
-      mainPage.deviceLayer.sendControlCommand(cfgCmd);
+
+    if (enabled) {
+      updated.add(dsi);
+    } else {
+      updated.remove(dsi);
     }
+    appState.updateMonitoredDataServices(updated);
+
+    mainPage.deviceLayer.sendControlCommand(
+      SXiMonitorDataServiceCommand(
+        enabled
+            ? DataServiceMonitorUpdateType.startMonitorForService
+            : DataServiceMonitorUpdateType.stopMonitorForService,
+        dsi,
+      ),
+    );
   }
 
   String _logLevelLabel(Level level) {

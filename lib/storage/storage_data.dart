@@ -200,7 +200,7 @@ class StorageData {
         case SaveDataType.logLevel:
         case SaveDataType.linkTraceEnabled:
         case SaveDataType.logOverlayEnabled:
-        case SaveDataType.monitoredDataServices:
+        case SaveDataType.monitoredDSI:
         case SaveDataType.secondaryBaudRate:
         case SaveDataType.audioSampleRate:
         case SaveDataType.mediaKeyBehavior:
@@ -270,7 +270,7 @@ class StorageData {
         case SaveDataType.logLevel:
         case SaveDataType.linkTraceEnabled:
         case SaveDataType.logOverlayEnabled:
-        case SaveDataType.monitoredDataServices:
+        case SaveDataType.monitoredDSI:
         case SaveDataType.secondaryBaudRate:
         case SaveDataType.audioSampleRate:
         case SaveDataType.mediaKeyBehavior:
@@ -429,7 +429,7 @@ enum SaveDataType {
   logLevel,
   linkTraceEnabled,
   logOverlayEnabled,
-  monitoredDataServices,
+  monitoredDSI,
   secondaryBaudRate,
   audioSampleRate,
   mediaKeyBehavior,

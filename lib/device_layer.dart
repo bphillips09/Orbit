@@ -296,18 +296,6 @@ class DeviceLayer {
     // Send the config payload, which finishes the boot-up sequence
     sendConfigPayload();
 
-    // Re-apply monitored data services selection if any
-    try {
-      final selected = _sxiLayer.appState.monitoredDataServices;
-      for (final d in selected) {
-        final cfgCmd = SXiMonitorDataServiceCommand(
-          DataServiceMonitorUpdateType.startMonitorForService,
-          d,
-        );
-        sendControlCommand(cfgCmd);
-      }
-    } catch (_) {}
-
     _startHeartbeatMonitor();
     return true;
   }
@@ -734,6 +722,31 @@ class DeviceLayer {
     final List<int> artistFavSecond =
         favoriteArtistIDs.skip(60).take(60).toList();
 
+    final Set<DataServiceIdentifier> monitoredServices =
+        _sxiLayer.appState.monitoredDataServices.isEmpty
+            ? <DataServiceIdentifier>{
+                DataServiceIdentifier.albumArt,
+                DataServiceIdentifier.channelGraphicsUpdates,
+              }
+            : Set<DataServiceIdentifier>.from(
+                _sxiLayer.appState.monitoredDataServices);
+
+    final List<SXiPayload> dataServiceMonitorPayloads = <SXiPayload>[
+      SXiMonitorDataServiceCommand(
+          DataServiceMonitorUpdateType.stopMonitorForAllServices,
+          DataServiceIdentifier.none),
+    ];
+    final sortedMonitoredServices = monitoredServices.toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    dataServiceMonitorPayloads.addAll(
+      sortedMonitoredServices.map(
+        (dsi) => SXiMonitorDataServiceCommand(
+          DataServiceMonitorUpdateType.startMonitorForService,
+          dsi,
+        ),
+      ),
+    );
+
     List<SXiPayload> initPayloads = [
       // Standard module config
       SXiConfigureModuleCommand(1, 2, 2, 0, 0, 0, 1, 1, 1, 0, 3, 0),
@@ -845,17 +858,7 @@ class DeviceLayer {
         FeatureMonitorType.metadata,
         FeatureMonitorType.storedMetadata
       ]),
-      // Setup data monitors (stop all active monitors)
-      SXiMonitorDataServiceCommand(
-          DataServiceMonitorUpdateType.stopMonitorForAllServices,
-          DataServiceIdentifier.none),
-      // Setup data monitors (start monitoring album art and channel graphics)
-      SXiMonitorDataServiceCommand(
-          DataServiceMonitorUpdateType.startMonitorForService,
-          DataServiceIdentifier.albumArt),
-      SXiMonitorDataServiceCommand(
-          DataServiceMonitorUpdateType.startMonitorForService,
-          DataServiceIdentifier.channelGraphicsUpdates),
+      ...dataServiceMonitorPayloads,
       // Setup status monitors (stop all active monitors)
       SXiMonitorStatusCommand(MonitorChangeType.dontMonitorAll, List.empty()),
       // Setup status monitors (start monitoring signal and antenna status)
