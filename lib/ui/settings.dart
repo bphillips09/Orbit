@@ -252,6 +252,7 @@ class SettingsPage extends StatelessWidget {
                       appState.updateAutoConnectOnFocusGain(value);
                     },
                   ),
+                _buildConnectionRetryCountSelector(context, appState),
                 _buildSettingTile(
                   context,
                   'Port Selection',
@@ -488,6 +489,10 @@ class SettingsPage extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 8),
+                if (!kIsWeb && !kIsWasm && Platform.isAndroid)
+                  _buildAndroidStartupSilenceToggle(context),
+                if (!kIsWeb && !kIsWasm && Platform.isAndroid)
+                  const SizedBox(height: 8),
                 if (appState.enableAudio) ...[
                   _buildSampleRateSelector(context, appState),
                   _buildSettingTile(
@@ -1308,6 +1313,20 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
+  Widget _buildAndroidStartupSilenceToggle(BuildContext context) {
+    final appState = Provider.of<AppState>(context);
+    return _buildSwitchTile(
+      context,
+      'Startup Silence',
+      'On Android, play silence at startup to force Audio Focus gain',
+      Icons.volume_mute,
+      value: appState.playStartupSilence,
+      onChanged: (v) {
+        appState.updatePlayStartupSilence(v);
+      },
+    );
+  }
+
   Widget _buildSecondaryBaudSelector(BuildContext context, AppState appState) {
     final theme = Theme.of(context);
     // Allowed baud rates matching device codes 0..4
@@ -1353,6 +1372,48 @@ class SettingsPage extends StatelessWidget {
             } catch (_) {}
           },
           items: baudRates
+              .map(
+                (r) => DropdownMenuItem<int>(
+                  value: r,
+                  child: Text('$r'),
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConnectionRetryCountSelector(
+      BuildContext context, AppState appState) {
+    final theme = Theme.of(context);
+    const List<int> retryOptions = [0, 1, 2, 3, 4, 5, 6, 8, 10];
+    int current = retryOptions.contains(appState.connectionRetryCount)
+        ? appState.connectionRetryCount
+        : 5;
+
+    return ListTile(
+      leading: Icon(Icons.timer, color: theme.colorScheme.primary),
+      title: Text(
+        'Connection Retries',
+        style: theme.textTheme.bodyLarge?.copyWith(
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      subtitle: Text(
+        'Amount of retries after connection failure',
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurface,
+        ),
+      ),
+      trailing: DropdownButtonHideUnderline(
+        child: DropdownButton<int>(
+          value: current,
+          onChanged: (value) {
+            if (value == null) return;
+            appState.updateConnectionRetryCount(value);
+          },
+          items: retryOptions
               .map(
                 (r) => DropdownMenuItem<int>(
                   value: r,
@@ -2501,8 +2562,10 @@ class SettingsPage extends StatelessWidget {
       await appState.storageData.delete(SaveDataType.lastAudioDevice);
       await appState.storageData.delete(SaveDataType.audioSampleRate);
       await appState.storageData.delete(SaveDataType.useNativeAuxInput);
+      await appState.storageData.delete(SaveDataType.playStartupSilence);
       appState.updateAudioSampleRate(48000);
       appState.updateUseNativeAuxInput(false);
+      appState.updatePlayStartupSilence(true);
 
       // Stop current audio
       await mainPage.audioController.stopAudioThread();

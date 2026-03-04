@@ -10,7 +10,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.os.Bundle
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
@@ -23,19 +22,15 @@ class MainActivity : AudioServiceActivity() {
     @Volatile private var didPlayStartupSilence: Boolean = false
   }
 
-  private val channelName = "com.bp.orbit/head_unit"
+  private val headUnitChannelName = "com.bp.orbit/head_unit"
+  private val platformChannelName = "com.bp.orbit/platform"
   private val executor = Executors.newCachedThreadPool()
   private val mainHandler = Handler(Looper.getMainLooper())
-
-  override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
-    playStartupSilenceOnce()
-  }
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
 
-    MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+    MethodChannel(flutterEngine.dartExecutor.binaryMessenger, headUnitChannelName)
       .setMethodCallHandler { call, result ->
         when (call.method) {
           "isSupported" -> {
@@ -111,6 +106,17 @@ class MainActivity : AudioServiceActivity() {
                 )
               }
             }
+          }
+          else -> result.notImplemented()
+        }
+      }
+
+    MethodChannel(flutterEngine.dartExecutor.binaryMessenger, platformChannelName)
+      .setMethodCallHandler { call, result ->
+        when (call.method) {
+          "playStartupSilence" -> {
+            playStartupSilenceOnce()
+            result.success(null)
           }
           else -> result.notImplemented()
         }

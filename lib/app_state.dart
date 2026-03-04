@@ -47,11 +47,13 @@ class AppState extends ChangeNotifier {
   // Android-only: preferred audio output route
   String androidAudioOutputRoute = 'Speaker';
   bool detectAudioInterruptions = true;
+  bool playStartupSilence = true;
   // Android-only: if true, use head unit native aux input instead of app playback
   bool useNativeAuxInput = false;
   bool quitAuxWhenSuspended = true;
   bool switchToAuxOnFocusGain = true;
   bool autoConnectOnFocusGain = true;
+  int connectionRetryCount = 5;
   bool restartPending = false;
   bool isScanActive = false;
   bool isTuneMixActive = false;
@@ -471,6 +473,11 @@ class AppState extends ChangeNotifier {
       defaultValue: true,
     );
 
+    playStartupSilence = await storageData.load(
+      SaveDataType.playStartupSilence,
+      defaultValue: true,
+    );
+
     // Load head unit aux input preference
     useNativeAuxInput = await storageData.load(
       SaveDataType.useNativeAuxInput,
@@ -493,6 +500,13 @@ class AppState extends ChangeNotifier {
       SaveDataType.autoConnectOnFocusGain,
       defaultValue: true,
     );
+    connectionRetryCount = await storageData.load(
+      SaveDataType.connectionRetryCount,
+      defaultValue: 5,
+    );
+    if (connectionRetryCount < 0) {
+      connectionRetryCount = 0;
+    }
 
     // Load audio sample rate preference (default 48000)
     audioSampleRate = await storageData.load(
@@ -747,6 +761,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updatePlayStartupSilence(bool value) {
+    playStartupSilence = value;
+    storageData.save(SaveDataType.playStartupSilence, value);
+    notifyListeners();
+  }
+
   void updateUseNativeAuxInput(bool value) {
     useNativeAuxInput = value;
     storageData.save(SaveDataType.useNativeAuxInput, value);
@@ -768,6 +788,12 @@ class AppState extends ChangeNotifier {
   void updateAutoConnectOnFocusGain(bool value) {
     autoConnectOnFocusGain = value;
     storageData.save(SaveDataType.autoConnectOnFocusGain, value);
+    notifyListeners();
+  }
+
+  void updateConnectionRetryCount(int value) {
+    connectionRetryCount = value < 0 ? 0 : value;
+    storageData.save(SaveDataType.connectionRetryCount, connectionRetryCount);
     notifyListeners();
   }
 

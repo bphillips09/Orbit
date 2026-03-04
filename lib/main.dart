@@ -40,6 +40,7 @@ import 'package:orbit/ui/favorite_dialog.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/welcome_dialog.dart';
 import 'package:orbit/ui/connection_dialogs.dart';
+import 'package:orbit/platform/android_platform_settings.dart';
 import 'package:orbit/platform/head_unit_aux.dart';
 import 'package:orbit/ui/log_overlay.dart';
 
@@ -212,6 +213,7 @@ class MainPageState extends State<MainPage>
   GlobalKey sliderKey = GlobalKey();
   bool _isLoading = true;
   bool _startupInProgress = false;
+  bool _startupRetryLoopActive = false;
   bool _suppressFatalConnectionDialogs = false;
   String? _lastStartupConnectionError;
   bool _deviceConnected = false;
@@ -329,6 +331,10 @@ class MainPageState extends State<MainPage>
       appState.audioFocusNotifier.addListener(_onAudioFocusChanged);
       appState.audioResumeIntentNotifier.addListener(_onAudioResumeIntent);
       appState.favoriteOnAirNotifier.addListener(onFavoriteOnAir);
+
+      if (!kIsWeb && !kIsWasm && appState.playStartupSilence) {
+        unawaited(AndroidPlatformSettings.playStartupSilence());
+      }
 
       try {
         await startupSequence();
@@ -606,11 +612,75 @@ class MainPageState extends State<MainPage>
     Object? portObject, {
     SerialTransport transport = SerialTransport.serial,
   }) async {
-    setState(() {
-      _isLoading = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
     _deviceConnected = false;
 
+    final int totalRetries =
+        appState.connectionRetryCount < 0 ? 0 : appState.connectionRetryCount;
+    _startupRetryLoopActive = true;
+    try {
+      for (int retryIndex = 0; retryIndex <= totalRetries; retryIndex++) {
+        if (_userRequestedDisconnect) {
+          logger.i('Startup retry aborted due to user disconnect');
+          break;
+        }
+
+        if (retryIndex > 0) {
+          final int delaySeconds = retryIndex - 1;
+          final int attemptNumber = retryIndex + 1;
+          final int totalAttempts = totalRetries + 1;
+          if (delaySeconds > 0) {
+            onConnectionDetailsUpdated(
+              'Connecting...',
+              'Retrying connection ($attemptNumber/$totalAttempts) in ${delaySeconds}s...',
+            );
+            await Future.delayed(Duration(seconds: delaySeconds));
+          } else {
+            onConnectionDetailsUpdated(
+              'Connecting...',
+              'Retrying connection ($attemptNumber/$totalAttempts)...',
+            );
+          }
+        }
+
+        final success = await _tryStartupSingleAttempt(
+          portString,
+          portObject,
+          transport: transport,
+        );
+        if (success) {
+          _userRequestedDisconnect = false;
+          return true;
+        }
+
+        if (retryIndex < totalRetries) {
+          final int attemptNumber = retryIndex + 1;
+          final int totalAttempts = totalRetries + 1;
+          final err = (_lastStartupConnectionError ?? '').trim();
+          logger.w(
+              'Startup connection attempt $attemptNumber/$totalAttempts failed${err.isEmpty ? '' : ': $err'}');
+        }
+      }
+      return false;
+    } finally {
+      _startupRetryLoopActive = false;
+      if (mounted && !_deviceConnected) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<bool> _tryStartupSingleAttempt(
+    String portString,
+    Object? portObject, {
+    SerialTransport transport = SerialTransport.serial,
+  }) async {
     try {
       // Ensure any existing connection is closed before creating a new one
       try {
@@ -669,23 +739,10 @@ class MainPageState extends State<MainPage>
 
       final success = await deviceLayer.startupSequence();
       _deviceConnected = success;
-      if (success) {
-        _userRequestedDisconnect = false;
-      }
-      if (!success && mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
       return success;
     } catch (e) {
       _lastStartupConnectionError = e.toString();
       _deviceConnected = false;
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
       return false;
     }
   }
@@ -722,7 +779,7 @@ class MainPageState extends State<MainPage>
     if (fatal) {
       if (_suppressFatalConnectionDialogs) {
         _lastStartupConnectionError = details;
-        if (mounted) {
+        if (mounted && !_startupRetryLoopActive) {
           setState(() {
             _isLoading = false;
           });

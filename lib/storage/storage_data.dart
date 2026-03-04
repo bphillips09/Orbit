@@ -213,6 +213,8 @@ class StorageData {
         case SaveDataType.quitAuxWhenSuspended:
         case SaveDataType.switchToAuxOnFocusGain:
         case SaveDataType.autoConnectOnFocusGain:
+        case SaveDataType.connectionRetryCount:
+        case SaveDataType.playStartupSilence:
         case SaveDataType.smallScreenMode:
         case SaveDataType.safeAreaInsetScale:
           record[key] = value;
@@ -283,6 +285,8 @@ class StorageData {
         case SaveDataType.quitAuxWhenSuspended:
         case SaveDataType.switchToAuxOnFocusGain:
         case SaveDataType.autoConnectOnFocusGain:
+        case SaveDataType.connectionRetryCount:
+        case SaveDataType.playStartupSilence:
         case SaveDataType.smallScreenMode:
         case SaveDataType.safeAreaInsetScale:
           return record[key];
@@ -442,6 +446,8 @@ enum SaveDataType {
   quitAuxWhenSuspended,
   switchToAuxOnFocusGain,
   autoConnectOnFocusGain,
+  connectionRetryCount,
+  playStartupSilence,
   smallScreenMode,
   safeAreaInsetScale,
 }
