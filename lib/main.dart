@@ -1036,9 +1036,8 @@ class MainPageState extends State<MainPage>
       }
     }
 
-    // If neither audio choice is saved yet, ask about native aux first
+    // Ask about native aux if that preference has not been set yet
     if (isAndroid &&
-        savedEnableAudio == null &&
         savedUseNativeAuxInput == null &&
         HeadUnitAux.isAvailable) {
       final useNativeAux = await _showUseNativeAuxDialog();
