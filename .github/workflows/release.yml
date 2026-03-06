@@ -76,6 +76,9 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
+      - name: Install macOS build tools
+        run: brew install automake libtool
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -116,6 +119,8 @@ jobs:
   build_windows:
     name: Build Windows
     runs-on: windows-latest
+    env:
+      PUB_CACHE: C:\PubCache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -125,6 +130,13 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+
+      - name: Enable Windows long paths
+        shell: pwsh
+        run: |
+          git config --system core.longpaths true
+          git config --global core.longpaths true
+          New-Item -ItemType Directory -Force -Path "$env:PUB_CACHE" | Out-Null
 
       - name: Enable Windows Desktop
         run: flutter config --enable-windows-desktop
