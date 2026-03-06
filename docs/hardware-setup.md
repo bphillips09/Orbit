@@ -93,3 +93,6 @@ Optional Dynavin female cable
 - [Analog Audio Breakout Cable](https://www.amazon.com/dp/B0CQXSR3MV)
 - [Dynavin Adapter Cable](https://dynavinnorthamerica.com/products/siriusxm-adapter-cable-for-the-dynavin-n7-only)
 - [Dual USB Hub](https://www.amazon.com/dp/B098L7WJ4C)
+
+## Other Interesting hardware
+- [Kycon KMDGX-10S-BS](https://www.mouser.com/ProductDetail/Kycon/KMDGX-10S-BS?qs=VJzT%2FAw5ytidY%252B3Vel0rpQ%3D%3D) - a 10-pin mini-din style connector that fit enough that you can shove the SVX300V1 connector into it
