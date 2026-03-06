@@ -631,18 +631,16 @@ class MainPageState extends State<MainPage>
 
         if (retryIndex > 0) {
           final int delaySeconds = retryIndex - 1;
-          final int attemptNumber = retryIndex + 1;
-          final int totalAttempts = totalRetries + 1;
           if (delaySeconds > 0) {
             onConnectionDetailsUpdated(
               'Connecting...',
-              'Retrying connection ($attemptNumber/$totalAttempts) in ${delaySeconds}s...',
+              'Waiting...',
             );
             await Future.delayed(Duration(seconds: delaySeconds));
           } else {
             onConnectionDetailsUpdated(
               'Connecting...',
-              'Retrying connection ($attemptNumber/$totalAttempts)...',
+              'Retrying...',
             );
           }
         }
