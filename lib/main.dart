@@ -1040,6 +1040,10 @@ class MainPageState extends State<MainPage>
         HeadUnitAux.isAvailable) {
       final useNativeAux = await _showUseNativeAuxDialog();
       if (useNativeAux) {
+        appState.resetEqValues();
+        sendEq();
+        await Future.delayed(const Duration(milliseconds: 200));
+        sendVol();
         appState.updateUseNativeAuxInput(true);
         try {
           await audioController.stopAudioThread();
