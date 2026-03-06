@@ -38,6 +38,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_io/io.dart';
 
+enum _AndroidConfigLocation { configExportFolder, pickLocation }
+
 class SettingsPage extends StatelessWidget {
   final MainPageState mainPage;
   static final Map<String, GlobalKey<_CollapsibleSectionState>> _sectionKeys = {
@@ -2160,6 +2162,41 @@ class SettingsPage extends StatelessWidget {
         return;
       }
 
+      if (Platform.isAndroid) {
+        if (!context.mounted) return;
+        final target = await _showAndroidConfigLocationDialog(
+          context,
+          action: 'export',
+        );
+        if (target == null) return;
+
+        if (target == _AndroidConfigLocation.configExportFolder) {
+          final exportDir = await _getAndroidConfigExportDirectory();
+          final outPath = '${exportDir.path}/$filename';
+          await File(outPath).writeAsBytes(zipBytes, flush: true);
+          await _openAndroidDirectoryInFileManager(exportDir);
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Exported config to $outPath')),
+          );
+          return;
+        }
+
+        final savePath = await FilePicker.platform.saveFile(
+          dialogTitle: 'Export Orbit Config',
+          fileName: filename,
+          type: FileType.custom,
+          allowedExtensions: const ['zip'],
+          bytes: zipBytes,
+        );
+        if (savePath == null || savePath.trim().isEmpty) return;
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Exported config to $savePath')),
+        );
+        return;
+      }
+
       final savePath = await FilePicker.platform.saveFile(
         dialogTitle: 'Export Orbit Config',
         fileName: filename,
@@ -2198,24 +2235,61 @@ class SettingsPage extends StatelessWidget {
 
   Future<void> _importConfigZip(BuildContext context, AppState appState) async {
     try {
-      final result = await FilePicker.platform.pickFiles(
-        dialogTitle: 'Import Orbit Config Zip',
-        type: FileType.custom,
-        allowedExtensions: const ['zip'],
-        withData: kIsWeb || kIsWasm,
-      );
-      if (result == null || result.files.isEmpty) return;
-
       Uint8List? zipBytes;
-      final picked = result.files.single;
-      if (kIsWeb || kIsWasm) {
-        zipBytes = picked.bytes;
-      } else {
-        final path = picked.path;
-        if (path == null || path.trim().isEmpty) {
-          throw StateError('Selected file path is unavailable.');
+      if (Platform.isAndroid) {
+        final target = await _showAndroidConfigLocationDialog(
+          context,
+          action: 'import',
+        );
+        if (target == null) return;
+
+        if (target == _AndroidConfigLocation.configExportFolder) {
+          final exportDir = await _getAndroidConfigExportDirectory();
+          await _openAndroidDirectoryInFileManager(exportDir);
+          if (!context.mounted) return;
+          zipBytes = await _pickAndroidConfigZipFromDirectory(
+            context,
+            exportDir,
+          );
+          if (zipBytes == null) return;
+        } else {
+          final result = await FilePicker.platform.pickFiles(
+            dialogTitle: 'Import Orbit Config Zip',
+            type: FileType.custom,
+            allowedExtensions: const ['zip'],
+            withData: true,
+          );
+          if (result == null || result.files.isEmpty) return;
+
+          final picked = result.files.single;
+          zipBytes = picked.bytes;
+          if (zipBytes == null) {
+            final path = picked.path;
+            if (path == null || path.trim().isEmpty) {
+              throw StateError('Selected file bytes are unavailable.');
+            }
+            zipBytes = await File(path).readAsBytes();
+          }
         }
-        zipBytes = await File(path).readAsBytes();
+      } else {
+        final result = await FilePicker.platform.pickFiles(
+          dialogTitle: 'Import Orbit Config Zip',
+          type: FileType.custom,
+          allowedExtensions: const ['zip'],
+          withData: kIsWeb || kIsWasm,
+        );
+        if (result == null || result.files.isEmpty) return;
+
+        final picked = result.files.single;
+        if (kIsWeb || kIsWasm) {
+          zipBytes = picked.bytes;
+        } else {
+          final path = picked.path;
+          if (path == null || path.trim().isEmpty) {
+            throw StateError('Selected file path is unavailable.');
+          }
+          zipBytes = await File(path).readAsBytes();
+        }
       }
 
       if (zipBytes == null || zipBytes.isEmpty) {
@@ -2298,6 +2372,144 @@ class SettingsPage extends StatelessWidget {
         ),
       );
     }
+  }
+
+  Future<_AndroidConfigLocation?> _showAndroidConfigLocationDialog(
+    BuildContext context, {
+    required String action,
+  }) async {
+    if (!context.mounted) return null;
+    return showDialog<_AndroidConfigLocation>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+            '${action[0].toUpperCase()}${action.substring(1)} config: choose location'),
+        content: const Text('Select where to read/write config zip files.'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context)
+                .pop(_AndroidConfigLocation.configExportFolder),
+            child: const Text('App config export folder'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(context).pop(_AndroidConfigLocation.pickLocation),
+            child: const Text('Pick location'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<Directory> _getAndroidConfigExportDirectory() async {
+    final externalDir = await getExternalStorageDirectory();
+    if (externalDir != null) {
+      final configDir = Directory('${externalDir.path}/config_export');
+      if (!await configDir.exists()) {
+        await configDir.create(recursive: true);
+      }
+      return configDir;
+    }
+
+    final appDir = await getApplicationSupportDirectory();
+    final fallback = Directory('${appDir.path}/config_export');
+    if (!await fallback.exists()) {
+      await fallback.create(recursive: true);
+    }
+    return fallback;
+  }
+
+  Future<void> _openAndroidDirectoryInFileManager(Directory directory) async {
+    if (!Platform.isAndroid) return;
+    try {
+      final result = await OpenFile.open(directory.path);
+      if (result.type == ResultType.done) {
+        return;
+      }
+    } catch (_) {}
+
+    try {
+      final intent = AndroidIntent(
+        action: 'android.intent.action.OPEN_DOCUMENT_TREE',
+        flags: <int>[0x10000000], // FLAG_ACTIVITY_NEW_TASK
+      );
+      await intent.launch();
+    } catch (_) {}
+  }
+
+  Future<Uint8List?> _pickAndroidConfigZipFromDirectory(
+    BuildContext context,
+    Directory directory,
+  ) async {
+    final entities = await directory.list().toList();
+    final files = <File>[];
+    for (final entity in entities) {
+      if (entity is File && entity.path.toLowerCase().endsWith('.zip')) {
+        files.add(entity);
+      }
+    }
+
+    if (files.isEmpty) {
+      if (!context.mounted) return null;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('No config zips found'),
+          content: Text('No config zip files found in ${directory.path}.'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return null;
+    }
+
+    final entries = await Future.wait(files.map((file) async {
+      final stat = await file.stat();
+      return MapEntry<File, DateTime>(file, stat.modified);
+    }));
+    entries.sort((a, b) => b.value.compareTo(a.value));
+
+    if (!context.mounted) return null;
+    final selected = await showDialog<File>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select config zip'),
+        content: SizedBox(
+          width: 500,
+          child: ListView(
+            shrinkWrap: true,
+            children: entries.map((entry) {
+              final file = entry.key;
+              final modified = entry.value.toLocal().toString();
+              final name = file.uri.pathSegments.last;
+              return ListTile(
+                dense: true,
+                title: Text(name),
+                subtitle: Text(modified),
+                onTap: () => Navigator.of(context).pop(file),
+              );
+            }).toList(),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (selected == null) return null;
+    return selected.readAsBytes();
   }
 
   Future<bool> _openSupportDirectory() async {
