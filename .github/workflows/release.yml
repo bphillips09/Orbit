@@ -59,7 +59,7 @@ jobs:
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android
+          name: Orbit-${{ steps.version.outputs.label }}-Android
           path: Orbit-${{ steps.version.outputs.label }}-Android.apk
           if-no-files-found: error
 
@@ -98,7 +98,7 @@ jobs:
       - name: Build macOS app
         run: flutter build macos --release
 
-      - name: Package macOS app
+      - name: Stage macOS app artifact
         run: |
           shopt -s nullglob
           APPS=(build/macos/Build/Products/Release/*.app)
@@ -107,13 +107,14 @@ jobs:
             exit 1
           fi
           APP_PATH="${APPS[0]}"
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "build/macos/Build/Products/Release/Orbit-${{ steps.version.outputs.label }}-macOS.zip"
+          mkdir -p build/macos-artifact
+          cp -R "$APP_PATH" "build/macos-artifact/Orbit.app"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macos
-          path: build/macos/Build/Products/Release/Orbit-${{ steps.version.outputs.label }}-macOS.zip
+          name: Orbit-${{ steps.version.outputs.label }}-macOS
+          path: build/macos-artifact/Orbit.app
           if-no-files-found: error
 
   build_windows:
@@ -162,70 +163,20 @@ jobs:
       - name: Build Windows app
         run: flutter build windows --release
 
-      - name: Package Windows app
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "Orbit-${{ steps.version.outputs.label }}-Windows.zip"
-
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows
-          path: Orbit-${{ steps.version.outputs.label }}-Windows.zip
-          if-no-files-found: error
-
-  build_web:
-    name: Build Web
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Compute version label
-        id: version
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            RAW_VERSION="${GITHUB_REF_NAME}"
-          else
-            RAW_VERSION="$(awk -F': ' '/^version:/{print $2; exit}' pubspec.yaml)"
-          fi
-          SANITIZED="$(echo "${RAW_VERSION}" | sed -E 's/^v?//; s/[^0-9.].*$//; s/\.//g')"
-          VERSION_LABEL="v${SANITIZED}"
-          echo "label=${VERSION_LABEL}" >> "$GITHUB_OUTPUT"
-
-      - name: Build web bundle
-        run: flutter build web --release --base-href /Orbit/
-
-      - name: Package web bundle
-        run: |
-          cd build/web
-          zip -r "../../Orbit-${{ steps.version.outputs.label }}-Web.zip" .
-
-      - name: Upload web artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: web
-          path: Orbit-${{ steps.version.outputs.label }}-Web.zip
+          name: Orbit-${{ steps.version.outputs.label }}-Windows
+          path: build/windows/x64/runner/Release
           if-no-files-found: error
 
   create_release:
     name: Create GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     needs:
       - build_android
       - build_macos
       - build_windows
-      - build_web
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Download build artifacts
@@ -236,12 +187,24 @@ jobs:
       - name: List release files
         run: ls -R dist
 
+      - name: Package release files
+        shell: bash
+        run: |
+          RAW_VERSION="${GITHUB_REF_NAME}"
+          SANITIZED="$(echo "${RAW_VERSION}" | sed -E 's/^v?//; s/[^0-9.].*$//; s/\.//g')"
+          VERSION_LABEL="v${SANITIZED}"
+
+          cp "dist/Orbit-${VERSION_LABEL}-Android/Orbit-${VERSION_LABEL}-Android.apk" "Orbit-${VERSION_LABEL}-Android.apk"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Orbit-${VERSION_LABEL}-macOS/Orbit.app" "Orbit-${VERSION_LABEL}-macOS.zip"
+          cd "dist/Orbit-${VERSION_LABEL}-Windows"
+          zip -r "../../Orbit-${VERSION_LABEL}-Windows.zip" .
+          cd ../..
+
       - name: Publish release and upload files
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            dist/android/Orbit-*-Android.apk
-            dist/macos/Orbit-*-macOS.zip
-            dist/windows/Orbit-*-Windows.zip
-            dist/web/Orbit-*-Web.zip
+            Orbit-*-Android.apk
+            Orbit-*-macOS.zip
+            Orbit-*-Windows.zip
