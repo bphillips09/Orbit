@@ -1,4 +1,15 @@
-### Hardware Setup (SXV300)
+### Hardware Setup
+
+Orbit currently supports two tuner families:
+
+- `SXV300` (Vehicle tuner)
+- `InfoLink` (Marine tuner)
+
+The InfoLink network tuner supports the same features as the SXV300 as well as weather data.
+
+Use the section below for your specific hardware.
+
+## SXV300
 
 This guide shows how to wire the SXV300 to a USB UART, audio input, and power. The diagram below summarizes all connections.
 
@@ -7,7 +18,7 @@ This guide shows how to wire the SXV300 to a USB UART, audio input, and power. T
 - A ready‑made female connector pigtail is available from Dynavin if you don't want to solder.
 - If you prefer direct wiring: the SXV300’s built‑in cable terminates at easily‑solderable test pads inside the case. The case opens with three Torx screws and gentle unsnapping along the corners.
 
-## Pinout:
+### Pinout
 
 <div align="left">
   <table>
@@ -37,7 +48,7 @@ This guide shows how to wire the SXV300 to a USB UART, audio input, and power. T
 
 
 
-## Hardware Overview
+### Hardware Overview
 <div align="left">
   <img src="https://i.imgur.com/9C9W2xL.png" alt="Hardware Overview" width="500" />
 </div>
@@ -51,14 +62,14 @@ Wiring tips:
 - Non‑vehicle use: a 12V 1A DC power adapter is recommended.
 - The SXV300 cable terminates at solderable test pads inside the case, which opens with three Torx screws and gentle unsnapping at corners.
 
-## Wiring Diagram
+### Wiring Diagram
 <div align="left">
   <a href="https://app.cirkitdesigner.com/project/0c22d9b6-d721-4c25-b506-b9e4cf0f9c46" target="_blank" rel="noopener noreferrer">
     <img src="https://i.imgur.com/4T3MgIE.jpeg" alt="Wiring Diagram" width="500" />
   </a>
 </div>
 
-## Connection Diagram (ASCII)
+### Connection Diagram (ASCII)
 ```text
 Host (Android / macOS / Windows / Web)
   |- USB -> USB UART Adapter
@@ -85,7 +96,7 @@ Optional Dynavin female cable
   Power Enable -> 12V or ACC/AMP enable
 ```
 
-## Known-Working Adapters for All Platforms
+### Known-Working Adapters for All Platforms
 - [USB UART](https://www.amazon.com/dp/B09F3196FB)
 - [USB Audio-in](https://www.amazon.com/dp/B00NMXY2MO)
 - [12V 1A DC Power Supply](https://www.amazon.com/dp/B0BX5F3562)
@@ -93,3 +104,75 @@ Optional Dynavin female cable
 - [Analog Audio Breakout Cable](https://www.amazon.com/dp/B0CQXSR3MV)
 - [Dynavin Adapter Cable](https://dynavinnorthamerica.com/products/siriusxm-adapter-cable-for-the-dynavin-n7-only)
 - [Dual USB Hub](https://www.amazon.com/dp/B098L7WJ4C)
+
+## InfoLink
+
+Navico sells the same InfoLink hardware under several brands. As far as currently known, these units appear to be functionally identical and only differ by the network cable wiring / default network address:
+
+- `Simrad/Lowrance/B&G WM-4`
+- `Raymarine SR200`
+- `Furuno BBWX4`
+
+### Power and audio
+
+- Power input: `12V DC`
+- A `2A` supply has been tested successfully
+- Audio output is line-level analog on `L`, `R`, and `GND`
+
+### Ethernet wiring and modes
+
+The InfoLink uses ethernet with a `T568B` pinout.
+
+The active data pins are:
+
+| Pin | T568B color | Purpose |
+| --- | --- | --- |
+| 1 | White/Orange | Ethernet pair |
+| 2 | Orange | Ethernet pair |
+| 3 | White/Green | Ethernet pair |
+| 6 | Green | Ethernet pair |
+
+Pins `4` and `5` are the blue pair:
+
+| Pin | T568B color | Mode effect |
+| --- | --- | --- |
+| 4 | Blue | If connected to the far end, the unit uses DHCP |
+| 5 | White/Blue | If connected to the far end, the unit uses DHCP |
+
+The only known difference between `DHCP` mode and static IP mode is whether pins `4` and `5` are actually connected through to the switch / router / device at the other end, or potentially inside the cable itself.
+
+- If pins `4` and `5` are connected, `DHCP` is used
+- If pins `4` and `5` are not connected, the unit uses its static address
+
+### Default addresses by variant
+
+Using the manufacturer-supplied cable wiring, the default behavior is:
+
+| Model | Default network mode | Default address |
+| --- | --- | --- |
+| `WM-4` | Static IP | `172.22.255.252` |
+| `SR200` | DHCP | Assigned by network |
+| `BBWX4` | Static IP | `172.31.200.21` |
+
+- Orbit's default network host is `172.22.255.252`.
+- The InfoLink defaults to using port `3555` for UART and port `4556` for GPIO
+
+### Modifying InfoLink hardware
+
+The 6 Torx screws can be removed to open the InfoLink devices. There is a rubber pressure seal (since it's a marine device) that is easily removed. The top case can be replaced [with one I've 3D modeled](https://www.printables.com/model/1628495-infolink-box-top).
+
+The 3D-printed top case can accomodate:
+- [12V Female DC Power Jack](https://amazon.com/dp/B0CR8TZ41W)
+- [3.5mm Stereo Female Panel-Mount Connector](https://amazon.com/dp/B077XPSKQD)
+- [RJ45 Keystone Jack](https://amazon.com/dp/B003L171FW)
+- Built-in SMA Antenna Connector
+
+Example customized for Orbit:
+<div align="left">
+  <img src="https://i.imgur.com/4Arv98U.png" alt="Orbit InfoLink" width="500" />
+</div>
+
+Example of connections inside the InfoLink:
+<div align="left">
+  <img src="https://i.imgur.com/NGu6UPt.png" alt="Orbit InfoLink" width="500" />
+</div>

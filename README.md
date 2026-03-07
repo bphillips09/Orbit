@@ -6,7 +6,7 @@
 
 An offline satellite radio player that can work completely without internet.
 
-Orbit connects to an [SXV300][sxv300-link] tuner and controls it using the SXi protocol.
+Orbit connects to [`SXV300`][sxv300-link] and [`InfoLink`][infolink-link] tuners and controls them using the SXi protocol.
 
 ## Features
 
@@ -80,6 +80,7 @@ This app interacts with serial devices and can capture audio for playback. It re
 
 This project is unaffiliated with any satellite radio provider. Names and trademarks belong to their respective owners.
 
-[sxv300-link]: <https://amazon.com/dp/B00NJTO4CY>
+[infolink-link]: <https://www.siriusxm.com/marine/hardware/>
+[sxv300-link]: <https://shop.siriusxm.com/siriusxm-sxv300-vehicle-tuner.html>
 [releases-link]: <https://github.com/bphillips09/orbit/releases/latest>
 [web-link]: <https://bphillips09.github.io/Orbit/>
