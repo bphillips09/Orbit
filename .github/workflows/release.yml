@@ -98,7 +98,7 @@ jobs:
       - name: Build macOS app
         run: flutter build macos --release
 
-      - name: Stage macOS app artifact
+      - name: Package macOS app
         run: |
           shopt -s nullglob
           APPS=(build/macos/Build/Products/Release/*.app)
@@ -107,14 +107,13 @@ jobs:
             exit 1
           fi
           APP_PATH="${APPS[0]}"
-          mkdir -p build/macos-artifact
-          cp -R "$APP_PATH" "build/macos-artifact/Orbit.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "Orbit-${{ steps.version.outputs.label }}-macOS.zip"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: Orbit-${{ steps.version.outputs.label }}-macOS
-          path: build/macos-artifact/Orbit.app
+          path: Orbit-${{ steps.version.outputs.label }}-macOS.zip
           if-no-files-found: error
 
   build_windows:
@@ -163,16 +162,21 @@ jobs:
       - name: Build Windows app
         run: flutter build windows --release
 
+      - name: Package Windows app
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "Orbit-${{ steps.version.outputs.label }}-Windows.zip"
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: Orbit-${{ steps.version.outputs.label }}-Windows
-          path: build/windows/x64/runner/Release
+          path: Orbit-${{ steps.version.outputs.label }}-Windows.zip
           if-no-files-found: error
 
   create_release:
     name: Create GitHub Release
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     needs:
       - build_android
       - build_macos
@@ -184,21 +188,12 @@ jobs:
         with:
           path: dist
 
-      - name: List release files
-        run: ls -R dist
-
-      - name: Package release files
-        shell: bash
+      - name: Prepare release assets
         run: |
-          RAW_VERSION="${GITHUB_REF_NAME}"
-          SANITIZED="$(echo "${RAW_VERSION}" | sed -E 's/^v?//; s/[^0-9.].*$//; s/\.//g')"
-          VERSION_LABEL="v${SANITIZED}"
-
-          cp "dist/Orbit-${VERSION_LABEL}-Android/Orbit-${VERSION_LABEL}-Android.apk" "Orbit-${VERSION_LABEL}-Android.apk"
-          ditto -c -k --sequesterRsrc --keepParent "dist/Orbit-${VERSION_LABEL}-macOS/Orbit.app" "Orbit-${VERSION_LABEL}-macOS.zip"
-          cd "dist/Orbit-${VERSION_LABEL}-Windows"
-          zip -r "../../Orbit-${VERSION_LABEL}-Windows.zip" .
-          cd ../..
+          cp dist/Orbit-*-Android/Orbit-*-Android.apk .
+          cp dist/Orbit-*-macOS/Orbit-*-macOS.zip .
+          cp dist/Orbit-*-Windows/Orbit-*-Windows.zip .
+          ls -la
 
       - name: Publish release and upload files
         uses: softprops/action-gh-release@v2
