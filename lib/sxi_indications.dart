@@ -1729,13 +1729,13 @@ class SXiErrorIndication extends SXiPayload {
   final int error;
 
   SXiErrorIndication.fromBytes(List<int> frame)
-      : error = frame[3],
+      : error = frame.length >= 5
+            ? bitCombine(frame[3], frame[4])
+            : frame[3],
         super(frame[0], frame[1], frame[2]);
 
   @override
   List<int> getParameters() {
-    return [
-      error,
-    ];
+    return error < 256 ? [error] : [(error >> 8) & 0xFF, error & 0xFF];
   }
 }
