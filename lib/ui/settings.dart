@@ -197,6 +197,7 @@ class SettingsPage extends StatelessWidget {
                     appState.updateSliderSnapping(value);
                   },
                 ),
+                _buildPresetArrowVisibilitySelector(context, appState),
                 _buildMediaKeyBehaviorSelector(context, appState),
                 if (appState.mediaKeyBehavior != MediaKeyBehavior.track)
                   _buildSwitchTile(
@@ -210,6 +211,46 @@ class SettingsPage extends StatelessWidget {
                           .updateMediaKeysControlTrackWhenScanMixActive(value);
                     },
                   ),
+                _buildSwitchTile(
+                  context,
+                  'Media Keys Navigate Favorites/Guide',
+                  'Use track back/forward to scroll and play/pause to select in Favorites and Guide windows',
+                  Icons.tune,
+                  value: appState.mediaKeysNavigateFavoritesAndGuide,
+                  onChanged: (value) {
+                    appState.updateMediaKeysNavigateFavoritesAndGuide(value);
+                  },
+                ),
+                _buildSwitchTile(
+                  context,
+                  'Reverse Media Forward/Back',
+                  'Swap media key forward and back actions',
+                  Icons.swap_horiz,
+                  value: appState.reverseMediaForwardBack,
+                  onChanged: (value) {
+                    appState.updateReverseMediaForwardBack(value);
+                  },
+                ),
+                _buildSwitchTile(
+                  context,
+                  'Dismiss Guide On Select',
+                  'Close the guide window after selecting a channel',
+                  Icons.close_fullscreen,
+                  value: appState.dismissGuideOnSelect,
+                  onChanged: (value) {
+                    appState.updateDismissGuideOnSelect(value);
+                  },
+                ),
+                _buildSwitchTile(
+                  context,
+                  'Dismiss On-Air Favorites On Select',
+                  'Close the on-air favorites window after selecting a channel',
+                  Icons.close,
+                  value: appState.dismissOnAirFavoritesOnSelect,
+                  onChanged: (value) {
+                    appState.updateDismissOnAirFavoritesOnSelect(value);
+                  },
+                ),
               ],
             ),
             const SizedBox(height: sectionSpacing),
@@ -218,11 +259,6 @@ class SettingsPage extends StatelessWidget {
               'Appearance',
               Icons.palette,
               [
-                _buildThemeSelector(context, appState),
-                const SizedBox(height: 8),
-                _buildScaleSelector(context, appState),
-                const SizedBox(height: 8),
-                _buildDesignHeightSelector(context, appState),
                 _buildSwitchTile(
                   context,
                   'Small Screen Mode',
@@ -234,6 +270,11 @@ class SettingsPage extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 8),
+                _buildThemeSelector(context, appState),
+                const SizedBox(height: 8),
+                _buildScaleSelector(context, appState),
+                const SizedBox(height: 8),
+                _buildDesignHeightSelector(context, appState),
                 _buildSafeAreaInsetSelector(context, appState),
               ],
             ),
@@ -1536,6 +1577,49 @@ class SettingsPage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPresetArrowVisibilitySelector(
+      BuildContext context, AppState appState) {
+    final theme = Theme.of(context);
+    const Map<PresetArrowVisibility, String> labels = {
+      PresetArrowVisibility.auto: 'Auto (default)',
+      PresetArrowVisibility.show: 'Show',
+      PresetArrowVisibility.hide: 'Hide',
+    };
+
+    return ListTile(
+      leading: Icon(Icons.compare_arrows, color: theme.colorScheme.primary),
+      title: Text(
+        'Preset Arrows',
+        style: theme.textTheme.bodyLarge?.copyWith(
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      subtitle: Text(
+        'Control visibility of left/right arrows in the presets carousel',
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurface,
+        ),
+      ),
+      trailing: DropdownButtonHideUnderline(
+        child: DropdownButton<PresetArrowVisibility>(
+          value: appState.presetArrowVisibility,
+          onChanged: (value) {
+            if (value == null) return;
+            appState.updatePresetArrowVisibility(value);
+          },
+          items: PresetArrowVisibility.values
+              .map(
+                (v) => DropdownMenuItem<PresetArrowVisibility>(
+                  value: v,
+                  child: Text(labels[v] ?? v.name),
+                ),
+              )
+              .toList(),
+        ),
+      ),
     );
   }
 
