@@ -1588,8 +1588,6 @@ class _StreamingBetaPageState extends State<StreamingBetaPage> {
     }
   }
 
-  // Removed legacy just_audio playback. Using WebView-based playback instead.
-
   Future<void> _fetchNowPlaying() async {
     final channelId = _currentChannelId;
     if (channelId == null || channelId.isEmpty) {

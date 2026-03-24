@@ -205,6 +205,11 @@ class StorageData {
         case SaveDataType.audioSampleRate:
         case SaveDataType.mediaKeyBehavior:
         case SaveDataType.mediaKeysTrackDuringScanMix:
+        case SaveDataType.mediaKeysNavigateFavoritesAndGuide:
+        case SaveDataType.reverseMediaForwardBack:
+        case SaveDataType.presetArrowVisibility:
+        case SaveDataType.dismissGuideOnSelect:
+        case SaveDataType.dismissOnAirFavoritesOnSelect:
         case SaveDataType.interfaceScale:
         case SaveDataType.analyticsDisabled:
         case SaveDataType.detectAudioInterruptions:
@@ -277,6 +282,11 @@ class StorageData {
         case SaveDataType.audioSampleRate:
         case SaveDataType.mediaKeyBehavior:
         case SaveDataType.mediaKeysTrackDuringScanMix:
+        case SaveDataType.mediaKeysNavigateFavoritesAndGuide:
+        case SaveDataType.reverseMediaForwardBack:
+        case SaveDataType.presetArrowVisibility:
+        case SaveDataType.dismissGuideOnSelect:
+        case SaveDataType.dismissOnAirFavoritesOnSelect:
         case SaveDataType.interfaceScale:
         case SaveDataType.analyticsDisabled:
         case SaveDataType.detectAudioInterruptions:
@@ -438,6 +448,11 @@ enum SaveDataType {
   audioSampleRate,
   mediaKeyBehavior,
   mediaKeysTrackDuringScanMix,
+  mediaKeysNavigateFavoritesAndGuide,
+  reverseMediaForwardBack,
+  presetArrowVisibility,
+  dismissGuideOnSelect,
+  dismissOnAirFavoritesOnSelect,
   interfaceScale,
   analyticsDisabled,
   detectAudioInterruptions,

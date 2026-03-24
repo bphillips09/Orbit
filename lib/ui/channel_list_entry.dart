@@ -127,7 +127,13 @@ class ChannelListEntry extends StatelessWidget {
                             ),
                         ],
                       ),
-                      if (infoButton != null) infoButton!,
+                      if (infoButton != null)
+                        Focus(
+                          canRequestFocus: false,
+                          skipTraversal: true,
+                          descendantsAreFocusable: false,
+                          child: infoButton!,
+                        ),
                     ],
                   ),
             onTap: onTap,

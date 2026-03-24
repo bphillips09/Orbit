@@ -2471,7 +2471,19 @@ class MainPageState extends State<MainPage>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const CircularProgressIndicator(),
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onLongPress: () {
+                          unawaited(_openSettings());
+                        },
+                        child: const SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: Center(
+                            child: CircularProgressIndicator(),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 20),
                       Text(
                         _connectionDetails,

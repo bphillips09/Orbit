@@ -1,7 +1,7 @@
 // EPG Dialog, shows the Program Guide
-import 'dart:typed_data';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:orbit/app_state.dart';
 import 'package:orbit/metadata/channel_data.dart';
@@ -13,6 +13,7 @@ import 'package:orbit/ui/channel_info_dialog.dart';
 import 'package:orbit/helpers.dart';
 import 'package:orbit/ui/epg_search.dart';
 import 'package:orbit/ui/channel_list_entry.dart';
+import 'package:orbit/ui/media_key_dialog_navigation.dart';
 
 class EpgDialog extends StatefulWidget {
   final AppState appState;
@@ -48,10 +49,37 @@ class _EpgDialogState extends State<EpgDialog> {
   final Map<String, Uint8List> _trackArtCache = {};
   Timer? _debounce;
   bool _pendingScrollToTop = false;
+  int? _mediaKeyBindingToken;
   final TextEditingController _searchController = TextEditingController();
+  late final FocusNode _searchFocusNode;
+
   @override
   void initState() {
     super.initState();
+    _searchFocusNode = FocusNode(
+      skipTraversal: true,
+      debugLabel: 'epg-search',
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent) {
+          return KeyEventResult.ignored;
+        }
+        final key = event.logicalKey;
+        if (key == LogicalKeyboardKey.arrowDown ||
+            key == LogicalKeyboardKey.arrowUp) {
+          _searchFocusNode.unfocus();
+          Actions.invoke(
+            context,
+            DirectionalFocusIntent(
+              key == LogicalKeyboardKey.arrowDown
+                  ? TraversalDirection.down
+                  : TraversalDirection.up,
+            ),
+          );
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+    );
     selectedCategory = widget.initialCategory;
     _sortedChannels = widget.appState.sidMap.values.toList()
       ..sort((a, b) => a.channelNumber.compareTo(b.channelNumber));
@@ -62,11 +90,17 @@ class _EpgDialogState extends State<EpgDialog> {
     // Set up initial scrolling after the widget is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupInitialScrolling();
+      _registerMediaKeyNavigation();
     });
   }
 
   @override
   void dispose() {
+    if (_mediaKeyBindingToken != null) {
+      DialogMediaKeyNavigation.unregister(_mediaKeyBindingToken!);
+      _mediaKeyBindingToken = null;
+    }
+    _searchFocusNode.dispose();
     _debounce?.cancel();
     super.dispose();
   }
@@ -98,6 +132,74 @@ class _EpgDialogState extends State<EpgDialog> {
     }
   }
 
+  void _registerMediaKeyNavigation() {
+    if (!widget.appState.mediaKeysNavigateFavoritesAndGuide) return;
+    _mediaKeyBindingToken = DialogMediaKeyNavigation.register(
+      onTrackNavigate: _handleTrackNavigate,
+      onSelect: _handleSelect,
+    );
+  }
+
+  List<ChannelData> _buildFilteredChannels() {
+    final List<ChannelData> baseList = _sortedChannels
+        .where((channel) =>
+            selectedCategory == null || channel.catId == selectedCategory)
+        .toList();
+
+    final String trimmedQuery = searchQuery.trim();
+    final String lowerQuery = trimmedQuery.toLowerCase();
+    if (lowerQuery.isEmpty) {
+      return baseList;
+    }
+
+    final bool isNumeric = int.tryParse(lowerQuery) != null;
+    final List<_SearchResult> results = <_SearchResult>[];
+    final List<String> qTokens = EpgSearchUtils.tokenizeQuery(lowerQuery);
+    final Iterable<ChannelData> candidates = isNumeric
+        ? baseList
+        : baseList.where((c) => EpgSearchUtils.matchesAllTokens(c, qTokens));
+    for (final channel in candidates) {
+      final double score = EpgSearchUtils.computeSearchScore(
+        channel,
+        lowerQuery,
+        isNumeric: isNumeric,
+      );
+      if (score > 0) {
+        results.add(_SearchResult(channel: channel, score: score));
+      }
+    }
+    results.sort((a, b) {
+      final int cmp = b.score.compareTo(a.score);
+      if (cmp != 0) return cmp;
+      return a.channel.channelNumber.compareTo(b.channel.channelNumber);
+    });
+    return results.map((r) => r.channel).toList();
+  }
+
+  Future<bool> _handleTrackNavigate(bool forward) async {
+    if (!mounted) return false;
+    if (_searchFocusNode.hasFocus) {
+      _searchFocusNode.unfocus();
+    }
+    final BuildContext actionContext =
+        FocusManager.instance.primaryFocus?.context ?? context;
+    Actions.invoke(
+      actionContext,
+      DirectionalFocusIntent(
+        forward ? TraversalDirection.down : TraversalDirection.up,
+      ),
+    );
+    return true;
+  }
+
+  Future<bool> _handleSelect() async {
+    if (!mounted) return false;
+    final BuildContext actionContext =
+        FocusManager.instance.primaryFocus?.context ?? context;
+    Actions.invoke(actionContext, const ActivateIntent());
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     var currentPrograms = widget.appState.sidMap.values.toList();
@@ -107,47 +209,13 @@ class _EpgDialogState extends State<EpgDialog> {
       currentPrograms = currentPrograms.sublist(2);
     }
 
-    final List<ChannelData> baseList = _sortedChannels
-        .where((channel) =>
-            selectedCategory == null || channel.catId == selectedCategory)
-        .toList();
-
     final trimmedQuery = searchQuery.trim();
     final lowerQuery = trimmedQuery.toLowerCase();
     final String categoryLabel = selectedCategory == null
         ? 'All Channels'
         : (widget.appState.categories[selectedCategory] ?? 'Category');
 
-    List<ChannelData> filteredChannels;
-    if (lowerQuery.isEmpty) {
-      // No search, keep original ordering (by channel number)
-      filteredChannels = baseList;
-    } else {
-      // Compute relevance score for each channel, sort by score
-      final isNumeric = int.tryParse(lowerQuery) != null;
-      final results = <_SearchResult>[];
-      final List<String> qTokens = EpgSearchUtils.tokenizeQuery(lowerQuery);
-      final Iterable<ChannelData> candidates = isNumeric
-          ? baseList
-          : baseList.where((c) => EpgSearchUtils.matchesAllTokens(c, qTokens));
-      for (final channel in candidates) {
-        final double score = EpgSearchUtils.computeSearchScore(
-          channel,
-          lowerQuery,
-          isNumeric: isNumeric,
-        );
-        if (score > 0) {
-          results.add(_SearchResult(channel: channel, score: score));
-        }
-      }
-      results.sort((a, b) {
-        final cmp = b.score.compareTo(a.score);
-        if (cmp != 0) return cmp;
-        // Tie-break by channel number
-        return a.channel.channelNumber.compareTo(b.channel.channelNumber);
-      });
-      filteredChannels = results.map((r) => r.channel).toList();
-    }
+    final List<ChannelData> filteredChannels = _buildFilteredChannels();
 
     // Wait for the list to be attached before scrolling to the top
     if (_pendingScrollToTop) {
@@ -199,6 +267,7 @@ class _EpgDialogState extends State<EpgDialog> {
           SizedBox(
             height: 50,
             child: TextField(
+              focusNode: _searchFocusNode,
               controller: _searchController,
               decoration: InputDecoration(
                 hintText: 'Search song/artist or channel...',
@@ -451,7 +520,9 @@ class _EpgDialogState extends State<EpgDialog> {
                       },
                     ),
                     onTap: () {
-                      Navigator.pop(context, index);
+                      if (widget.appState.dismissGuideOnSelect) {
+                        Navigator.pop(context, index);
+                      }
                       final cfgCmd = SXiSelectChannelCommand(
                         ChanSelectionType.tuneUsingChannelNumber,
                         program.channelNumber,

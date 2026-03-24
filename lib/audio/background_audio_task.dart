@@ -7,6 +7,7 @@ import 'package:orbit/device_layer.dart';
 import 'package:orbit/platform/head_unit_aux.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/ui/preset.dart' show computeNextPresetSid;
+import 'package:orbit/ui/media_key_dialog_navigation.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:orbit/logging.dart';
@@ -39,6 +40,9 @@ class AudioServiceHandler extends BaseAudioHandler
 
   @override
   Future<void> play() async {
+    if (await DialogMediaKeyNavigation.handleSelect()) {
+      return;
+    }
     logger.d('---> PLAY');
     deviceLayer.sendControlCommand(
         SXiInstantReplayPlaybackControlCommand(PlaybackControlType.play, 0, 0));
@@ -46,6 +50,9 @@ class AudioServiceHandler extends BaseAudioHandler
 
   @override
   Future<void> pause() async {
+    if (await DialogMediaKeyNavigation.handleSelect()) {
+      return;
+    }
     logger.d('---> PAUSE');
     deviceLayer.sendControlCommand(SXiInstantReplayPlaybackControlCommand(
         PlaybackControlType.pause, 0, 0));
@@ -60,6 +67,10 @@ class AudioServiceHandler extends BaseAudioHandler
 
   @override
   Future<void> skipToPrevious() async {
+    final bool forward = appState.reverseMediaForwardBack;
+    if (await DialogMediaKeyNavigation.handleTrackNavigate(forward)) {
+      return;
+    }
     logger.d('---> PREV |<');
     switch (_effectiveMediaKeyBehaviorForScanMix()) {
       case MediaKeyBehavior.channel:
@@ -69,23 +80,33 @@ class AudioServiceHandler extends BaseAudioHandler
           ch = 0;
         }
         deviceLayer.sendControlCommand(SXiSelectChannelCommand(
-            ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
+            forward
+                ? ChanSelectionType.tuneToNextHigherChannelNumberInCategory
+                : ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
             ch,
             0xFF,
             ChannelAttributes.all(),
             AudioRoutingType.routeToAudio));
         break;
       case MediaKeyBehavior.presetCycle:
-        cyclePreset(left: true);
+        cyclePreset(left: !forward);
         break;
       case MediaKeyBehavior.track:
-        await rewind();
+        if (forward) {
+          await fastForward();
+        } else {
+          await rewind();
+        }
         break;
     }
   }
 
   @override
   Future<void> skipToNext() async {
+    final bool forward = !appState.reverseMediaForwardBack;
+    if (await DialogMediaKeyNavigation.handleTrackNavigate(forward)) {
+      return;
+    }
     logger.d('---> NEXT >|');
     switch (_effectiveMediaKeyBehaviorForScanMix()) {
       case MediaKeyBehavior.channel:
@@ -95,17 +116,23 @@ class AudioServiceHandler extends BaseAudioHandler
           ch = 0;
         }
         deviceLayer.sendControlCommand(SXiSelectChannelCommand(
-            ChanSelectionType.tuneToNextHigherChannelNumberInCategory,
+            forward
+                ? ChanSelectionType.tuneToNextHigherChannelNumberInCategory
+                : ChanSelectionType.tuneToNextLowerChannelNumberInCategory,
             ch,
             0xFF,
             ChannelAttributes.all(),
             AudioRoutingType.routeToAudio));
         break;
       case MediaKeyBehavior.presetCycle:
-        cyclePreset(left: false);
+        cyclePreset(left: !forward);
         break;
       case MediaKeyBehavior.track:
-        await fastForward();
+        if (forward) {
+          await fastForward();
+        } else {
+          await rewind();
+        }
         break;
     }
   }

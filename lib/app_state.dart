@@ -68,6 +68,11 @@ class AppState extends ChangeNotifier {
   // What hardware/media skip keys should control
   MediaKeyBehavior mediaKeyBehavior = MediaKeyBehavior.channel;
   bool mediaKeysControlTrackWhenScanMixActive = true;
+  bool mediaKeysNavigateFavoritesAndGuide = true;
+  bool reverseMediaForwardBack = false;
+  PresetArrowVisibility presetArrowVisibility = PresetArrowVisibility.auto;
+  bool dismissGuideOnSelect = false;
+  bool dismissOnAirFavoritesOnSelect = true;
   int _lastSid = 0;
   bool linkTraceEnabled = false;
   final Set<DataServiceIdentifier> monitoredDataServices =
@@ -91,6 +96,9 @@ class AppState extends ChangeNotifier {
   final Map<int, ChannelData> sidMap = {};
   bool _updatingCategories = false;
   bool _updatingChannels = false;
+  bool _suppressGuideUpdatingAfterInitialScan = false;
+  bool _initialChannelsScanComplete = false;
+  bool _initialCategoriesScanComplete = false;
   Timer? _categoriesUpdateTimer;
   Timer? _channelsUpdateTimer;
   int _currentCategory = 0;
@@ -527,6 +535,29 @@ class AppState extends ChangeNotifier {
       SaveDataType.mediaKeysTrackDuringScanMix,
       defaultValue: true,
     );
+    mediaKeysNavigateFavoritesAndGuide = await storageData.load(
+      SaveDataType.mediaKeysNavigateFavoritesAndGuide,
+      defaultValue: true,
+    );
+    reverseMediaForwardBack = await storageData.load(
+      SaveDataType.reverseMediaForwardBack,
+      defaultValue: false,
+    );
+    final int presetArrowVisibilityIndex = await storageData.load(
+      SaveDataType.presetArrowVisibility,
+      defaultValue: PresetArrowVisibility.auto.index,
+    );
+    presetArrowVisibility = PresetArrowVisibility.values[
+        presetArrowVisibilityIndex.clamp(
+            0, PresetArrowVisibility.values.length - 1)];
+    dismissGuideOnSelect = await storageData.load(
+      SaveDataType.dismissGuideOnSelect,
+      defaultValue: false,
+    );
+    dismissOnAirFavoritesOnSelect = await storageData.load(
+      SaveDataType.dismissOnAirFavoritesOnSelect,
+      defaultValue: true,
+    );
 
     notifyListeners();
   }
@@ -557,6 +588,25 @@ class AppState extends ChangeNotifier {
   void _cancelUpdateTimers() {
     _channelsUpdateTimer?.cancel();
     _categoriesUpdateTimer?.cancel();
+  }
+
+  void resetGuideUpdateIndicatorsForNewConnection() {
+    _suppressGuideUpdatingAfterInitialScan = false;
+    _initialChannelsScanComplete = false;
+    _initialCategoriesScanComplete = false;
+    _updatingChannels = false;
+    _updatingCategories = false;
+    _cancelUpdateTimers();
+    notifyListeners();
+  }
+
+  void _markInitialGuideScanCheckpoint() {
+    if (_initialChannelsScanComplete && _initialCategoriesScanComplete) {
+      _updatingChannels = false;
+      _updatingCategories = false;
+      _cancelUpdateTimers();
+      _suppressGuideUpdatingAfterInitialScan = true;
+    }
   }
 
   void updateLastSid(int sid) {
@@ -827,6 +877,36 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateMediaKeysNavigateFavoritesAndGuide(bool value) {
+    mediaKeysNavigateFavoritesAndGuide = value;
+    storageData.save(SaveDataType.mediaKeysNavigateFavoritesAndGuide, value);
+    notifyListeners();
+  }
+
+  void updateReverseMediaForwardBack(bool value) {
+    reverseMediaForwardBack = value;
+    storageData.save(SaveDataType.reverseMediaForwardBack, value);
+    notifyListeners();
+  }
+
+  void updatePresetArrowVisibility(PresetArrowVisibility value) {
+    presetArrowVisibility = value;
+    storageData.save(SaveDataType.presetArrowVisibility, value.index);
+    notifyListeners();
+  }
+
+  void updateDismissGuideOnSelect(bool value) {
+    dismissGuideOnSelect = value;
+    storageData.save(SaveDataType.dismissGuideOnSelect, value);
+    notifyListeners();
+  }
+
+  void updateDismissOnAirFavoritesOnSelect(bool value) {
+    dismissOnAirFavoritesOnSelect = value;
+    storageData.save(SaveDataType.dismissOnAirFavoritesOnSelect, value);
+    notifyListeners();
+  }
+
   void updateThemeMode(ThemeMode mode) {
     themeMode = mode;
     storageData.save(SaveDataType.themeMode, mode.index);
@@ -1053,12 +1133,27 @@ class AppState extends ChangeNotifier {
     if (sid == 0) {
       _updatingChannels = false;
       _channelsUpdateTimer?.cancel();
+      _initialChannelsScanComplete = true;
+      _markInitialGuideScanCheckpoint();
     } else {
-      _updatingChannels = true;
-      _scheduleChannelsUpdateTimeout();
+      if (!_suppressGuideUpdatingAfterInitialScan) {
+        _updatingChannels = true;
+        _scheduleChannelsUpdateTimeout();
+      } else {
+        _updatingChannels = false;
+      }
     }
 
-    sidMap[sid] = ChannelData(sid, channel, catId, channelName);
+    final ChannelData? existing = sidMap[sid];
+    if (existing == null) {
+      sidMap[sid] = ChannelData(sid, channel, catId, channelName);
+    } else {
+      existing
+        ..channelNumber = channel
+        ..catId = catId
+        ..channelName =
+            channelName.trim().isNotEmpty ? channelName : existing.channelName;
+    }
     _updatePresetsForSid(sid, artist: '', song: '');
     notifyListeners();
   }
@@ -1067,9 +1162,15 @@ class AppState extends ChangeNotifier {
     if (catId == 255) {
       _updatingCategories = false;
       _categoriesUpdateTimer?.cancel();
+      _initialCategoriesScanComplete = true;
+      _markInitialGuideScanCheckpoint();
     } else {
-      _updatingCategories = true;
-      _scheduleCategoriesUpdateTimeout();
+      if (!_suppressGuideUpdatingAfterInitialScan) {
+        _updatingCategories = true;
+        _scheduleCategoriesUpdateTimeout();
+      } else {
+        _updatingCategories = false;
+      }
     }
 
     _categories[catId] = categoryName;
@@ -1121,12 +1222,16 @@ class AppState extends ChangeNotifier {
       {required String artist, required String song}) {
     final channelData = sidMap[sid];
     if (channelData == null) return;
+    final String nextArtist =
+        artist.trim().isNotEmpty ? artist : channelData.currentArtist;
+    final String nextSong =
+        song.trim().isNotEmpty ? song : channelData.currentSong;
     for (var preset in presets.where((p) => p.sid == sid)) {
       preset
         ..channelNumber = channelData.channelNumber
         ..channelName = channelData.channelName
-        ..artist = artist
-        ..song = song;
+        ..artist = nextArtist
+        ..song = nextSong;
     }
   }
 
@@ -1641,6 +1746,12 @@ enum MediaKeyBehavior {
   channel,
   presetCycle,
   track,
+}
+
+enum PresetArrowVisibility {
+  auto,
+  show,
+  hide,
 }
 
 class PropertyValueNotifier<T> extends ValueNotifier<T> {

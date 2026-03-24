@@ -9,6 +9,7 @@ import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/helpers.dart';
 import 'package:orbit/ui/channel_list_entry.dart';
 import 'package:orbit/ui/favorites_manager.dart';
+import 'package:orbit/ui/media_key_dialog_navigation.dart';
 
 class FavoritesOnAirDialog extends StatefulWidget {
   final AppState appState;
@@ -26,27 +27,85 @@ class FavoritesOnAirDialog extends StatefulWidget {
 
 class _FavoritesOnAirDialogState extends State<FavoritesOnAirDialog> {
   final Map<int, Uint8List> _sidLogoCache = {};
+  int? _mediaKeyBindingToken;
+
+  List<FavoriteOnAirEntry> _buildDedupedEntries() {
+    final entries = widget.appState.favoritesOnAirEntries;
+    // If both song and artist are present for the same channel, prefer showing the song entry
+    final Map<String, FavoriteOnAirEntry> uniqueMap = {};
+    for (final e in entries) {
+      final key = '${e.sid}|${e.channelNumber}';
+      final existing = uniqueMap[key];
+      if (existing == null) {
+        uniqueMap[key] = e;
+      } else if (existing.isArtist && e.isSong) {
+        uniqueMap[key] = e;
+      }
+    }
+    return uniqueMap.values.toList();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.appState.mediaKeysNavigateFavoritesAndGuide) {
+      _mediaKeyBindingToken = DialogMediaKeyNavigation.register(
+        onTrackNavigate: _handleTrackNavigate,
+        onSelect: _handleSelect,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_mediaKeyBindingToken != null) {
+      DialogMediaKeyNavigation.unregister(_mediaKeyBindingToken!);
+      _mediaKeyBindingToken = null;
+    }
+    super.dispose();
+  }
+
+  Future<bool> _handleTrackNavigate(bool forward) async {
+    if (!mounted) return false;
+    final BuildContext actionContext =
+        FocusManager.instance.primaryFocus?.context ?? context;
+    Actions.invoke(
+      actionContext,
+      DirectionalFocusIntent(
+        forward ? TraversalDirection.down : TraversalDirection.up,
+      ),
+    );
+    return true;
+  }
+
+  Future<bool> _handleSelect() async {
+    if (!mounted) return false;
+    final BuildContext actionContext =
+        FocusManager.instance.primaryFocus?.context ?? context;
+    Actions.invoke(actionContext, const ActivateIntent());
+    return true;
+  }
+
+  void _tuneToEntry(FavoriteOnAirEntry entry) {
+    if (widget.appState.dismissOnAirFavoritesOnSelect && mounted) {
+      Navigator.pop(context);
+    }
+    final cfgCmd = SXiSelectChannelCommand(
+      ChanSelectionType.tuneUsingChannelNumber,
+      entry.channelNumber,
+      0xFF,
+      ChannelAttributes.all(),
+      AudioRoutingType.routeToAudio,
+    );
+    widget.deviceLayer.sendControlCommand(cfgCmd);
+  }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
-        final entries = widget.appState.favoritesOnAirEntries;
-        // If both song and artist are present for the same channel, prefer showing the song entry
-        final Map<String, FavoriteOnAirEntry> uniqueMap = {};
-        for (final e in entries) {
-          final key = '${e.sid}|${e.channelNumber}';
-          final existing = uniqueMap[key];
-          if (existing == null) {
-            uniqueMap[key] = e;
-          } else {
-            if (existing.isArtist && e.isSong) {
-              uniqueMap[key] = e;
-            }
-          }
-        }
-        final List<FavoriteOnAirEntry> deduped = uniqueMap.values.toList();
+        final List<FavoriteOnAirEntry> deduped = _buildDedupedEntries();
         return AlertDialog(
           title: Row(
             children: [
@@ -125,14 +184,7 @@ class _FavoritesOnAirDialogState extends State<FavoritesOnAirDialog> {
                           },
                         ),
                         onTap: () {
-                          final cfgCmd = SXiSelectChannelCommand(
-                            ChanSelectionType.tuneUsingChannelNumber,
-                            e.channelNumber,
-                            0xFF,
-                            ChannelAttributes.all(),
-                            AudioRoutingType.routeToAudio,
-                          );
-                          widget.deviceLayer.sendControlCommand(cfgCmd);
+                          _tuneToEntry(e);
                         },
                       );
                     },

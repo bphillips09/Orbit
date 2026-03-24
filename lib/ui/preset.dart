@@ -232,9 +232,20 @@ class PresetCarouselState extends State<PresetCarousel> {
                   final bool hideSideButtonsForTallTiles = smallScreenMode &&
                       isLandscapeMode &&
                       tileHeightForComparison > itemWidthWithNavigation;
-                  final bool showSideNavigation = maxPages > 1 &&
-                      isLandscapeMode &&
-                      !hideSideButtonsForTallTiles;
+                  final bool showSideNavigation;
+                  switch (appState.presetArrowVisibility) {
+                    case PresetArrowVisibility.auto:
+                      showSideNavigation = maxPages > 1 &&
+                          isLandscapeMode &&
+                          !hideSideButtonsForTallTiles;
+                      break;
+                    case PresetArrowVisibility.show:
+                      showSideNavigation = maxPages > 1;
+                      break;
+                    case PresetArrowVisibility.hide:
+                      showSideNavigation = false;
+                      break;
+                  }
                   final double navigationPadding =
                       showSideNavigation ? _navigationButtonWidth * 2 : 0.0;
                   final double effectiveWidth =
