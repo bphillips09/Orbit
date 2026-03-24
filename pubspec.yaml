@@ -1,7 +1,7 @@
 name: orbit
 description: 'Space Radio'
 publish_to: 'none'
-version: 0.4.0
+version: 0.5.0
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
   #ui
   cupertino_icons: ^1.0.8
-  image: ^4.7.2
+  image: ^4.8.0
   web: ^1.1.1
   carousel_slider: ^5.1.2
   super_sliver_list: ^0.4.1
@@ -23,7 +23,7 @@ dependencies:
   provider: ^6.1.5+1
   path_provider: ^2.1.5
   sembast: ^3.8.6
-  sembast_web: ^2.4.4
+  sembast_web: ^2.4.4+1
   #file operations
   open_file: ^3.5.11
   android_intent_plus: ^5.3.1
@@ -40,9 +40,9 @@ dependencies:
   flutter_inappwebview: ^6.2.0-beta.3
   #audio control
   audio_service: ^0.18.18
-  audio_session: ^0.2.2
+  audio_session: ^0.2.3
   #logging
-  logger: ^2.6.2
+  logger: ^2.7.0
   #versioning
   version: ^3.0.2
   package_info_plus: ^9.0.0
@@ -54,7 +54,7 @@ dependencies:
   #weather
   flutter_map: ^8.2.2
   latlong2: ^0.9.1
-  archive: ^4.0.7
+  archive: ^4.0.9
 
 dependency_overrides:
   #fix for stereo capture on macOS
@@ -75,7 +75,7 @@ dev_dependencies:
   build_runner: ^2.6.0
   package_rename: ^1.10.1
   flutter_launcher_icons: ^0.14.4
-  peanut: ^6.0.0
+  peanut: ^6.0.1
 
 flutter:
   uses-material-design: true
