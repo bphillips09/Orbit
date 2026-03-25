@@ -13,6 +13,7 @@ import 'package:orbit/platform/download_bytes.dart';
 import 'package:orbit/data/handlers/channel_graphics_handler.dart';
 import 'package:orbit/platform/head_unit_aux.dart';
 import 'package:orbit/serial_helper/serial_helper_interface.dart';
+import 'package:orbit/device_layer.dart';
 import 'package:orbit/ui/connection_dialogs.dart';
 import 'package:orbit/ui/epg_schedule_view.dart';
 import 'package:path_provider/path_provider.dart';
@@ -312,6 +313,8 @@ class SettingsPage extends StatelessWidget {
 
                     String portString = '';
                     Object? portObject;
+                    DeviceProtocolPreference preferredProtocol =
+                        DeviceProtocolPreference.auto;
 
                     if (transport == SerialTransport.serial) {
                       var res = await ConnectionDialogs.selectSerialPort(
@@ -324,6 +327,31 @@ class SettingsPage extends StatelessWidget {
                       portString = res.$1;
                       portObject = res.$2;
                       if (portString.isEmpty && portObject == null) return;
+
+                      final String savedPref = (await mainPage
+                                  .appState.storageData
+                                  .load(SaveDataType.preferredDeviceProtocol) ??
+                              '')
+                          .toString();
+                      DeviceProtocolPreference initialPreference =
+                          DeviceProtocolPreference.auto;
+                      for (final pref in DeviceProtocolPreference.values) {
+                        if (pref.name == savedPref) {
+                          initialPreference = pref;
+                          break;
+                        }
+                      }
+                      if (!context.mounted) return;
+                      final DeviceProtocolPreference? picked =
+                          await ConnectionDialogs.showDeviceProfilePicker(
+                        context,
+                        initialPreference: initialPreference,
+                        allowXm: true,
+                        barrierDismissible: true,
+                      );
+                      if (!context.mounted) return;
+                      if (picked == null) return;
+                      preferredProtocol = picked;
                     } else if (transport == SerialTransport.network &&
                         !kIsWeb &&
                         !kIsWasm) {
@@ -342,6 +370,11 @@ class SettingsPage extends StatelessWidget {
                         SaveDataType.lastPortTransport,
                         SerialTransport.network.name,
                       );
+                      await mainPage.appState.storageData.save(
+                        SaveDataType.preferredDeviceProtocol,
+                        DeviceProtocolPreference.sxiOnly.name,
+                      );
+                      preferredProtocol = DeviceProtocolPreference.sxiOnly;
                     } else {
                       return;
                     }
@@ -362,6 +395,7 @@ class SettingsPage extends StatelessWidget {
                       portString,
                       portObject,
                       transport: transport,
+                      preferredProtocol: preferredProtocol,
                     );
                     if (!context.mounted) return;
 

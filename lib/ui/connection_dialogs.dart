@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:orbit/device_layer.dart';
 import 'package:orbit/storage/storage_data.dart';
 import 'package:orbit/serial_helper/serial_helper_interface.dart';
 import 'package:orbit/logging.dart';
@@ -91,6 +92,94 @@ class ConnectionDialogs {
               ),
             ),
           ),
+        );
+      },
+    );
+  }
+
+  static Future<DeviceProtocolPreference?> showDeviceProfilePicker(
+    BuildContext context, {
+    DeviceProtocolPreference initialPreference = DeviceProtocolPreference.auto,
+    bool allowXm = true,
+    bool barrierDismissible = true,
+  }) async {
+    DeviceProtocolPreference selected = initialPreference;
+    if (!allowXm && selected == DeviceProtocolPreference.xmOnly) {
+      selected = DeviceProtocolPreference.auto;
+    }
+
+    return await showDialog<DeviceProtocolPreference>(
+      context: context,
+      barrierDismissible: barrierDismissible,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setStateDialog) {
+            return AlertDialog(
+              title: const Text('Device Profile'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListTile(
+                      leading: Icon(
+                        selected == DeviceProtocolPreference.auto
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                      ),
+                      title: const Text('Auto detect'),
+                      subtitle: const Text('Detect protocol automatically'),
+                      onTap: () {
+                        setStateDialog(
+                            () => selected = DeviceProtocolPreference.auto);
+                      },
+                    ),
+                    ListTile(
+                      leading: Icon(
+                        selected == DeviceProtocolPreference.sxiOnly
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                      ),
+                      title: const Text('SXi only'),
+                      subtitle: const Text('Use SXi protocol only'),
+                      onTap: () {
+                        setStateDialog(
+                            () => selected = DeviceProtocolPreference.sxiOnly);
+                      },
+                    ),
+                    ListTile(
+                      enabled: allowXm,
+                      leading: Icon(
+                        selected == DeviceProtocolPreference.xmOnly
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                      ),
+                      title: const Text('XM protocol only'),
+                      subtitle: Text(allowXm
+                          ? 'Use XM protocol only'
+                          : 'Not available for this transport'),
+                      onTap: allowXm
+                          ? () {
+                              setStateDialog(() =>
+                                  selected = DeviceProtocolPreference.xmOnly);
+                            }
+                          : null,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, null),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, selected),
+                  child: const Text('Continue'),
+                ),
+              ],
+            );
+          },
         );
       },
     );

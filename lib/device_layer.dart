@@ -10,6 +10,7 @@ import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/sxi_indications.dart';
 import 'package:orbit/sxi_payload.dart';
 import 'package:orbit/sxi_layer.dart';
+import 'package:orbit/xm_protocol_adapter.dart';
 import 'package:orbit/logging.dart';
 import 'package:orbit/debug_tools_stub.dart'
     if (dart.library.io) 'package:orbit/debug_tools.dart';
@@ -19,6 +20,17 @@ enum TimingStage {
   openStartToFirstRx,
   disconnectDetectedToReconnect,
   baudSwitchToStableRx,
+}
+
+enum DeviceProtocol {
+  sxi,
+  xm,
+}
+
+enum DeviceProtocolPreference {
+  auto,
+  sxiOnly,
+  xmOnly,
 }
 
 class DeviceLayer {
@@ -35,6 +47,7 @@ class DeviceLayer {
   final int baudRate;
   final Object port;
   final SerialTransport transport;
+  final DeviceProtocolPreference preferredProtocol;
   final SXiLayer _sxiLayer;
   final StreamController<DeviceMessage> _receiveController =
       StreamController<DeviceMessage>.broadcast();
@@ -49,7 +62,9 @@ class DeviceLayer {
   int _writeFailureCount = 0;
   int _highestReceivedSequence = 0;
   bool _initialized = false;
+  DeviceProtocol _activeProtocol = DeviceProtocol.sxi;
   Uint8List _buffer = Uint8List(0);
+  late final XmProtocolAdapter _xmAdapter;
   Timer? _heartbeatMonitorTimer;
   DateTime? _lastValidMessage;
   Timer? _networkInitRetryTimer;
@@ -61,15 +76,49 @@ class DeviceLayer {
     this.port,
     this.baudRate, {
     this.transport = SerialTransport.serial,
+    this.preferredProtocol = DeviceProtocolPreference.auto,
     this.systemConfiguration,
     this.onMessage,
     this.onError,
     this.onConnectionDetailChanged,
     this.onClearMessages,
-  });
+  }) {
+    _xmAdapter = XmProtocolAdapter(
+      serialHelper: _serialHelper,
+      port: port,
+      transport: transport,
+      dataHandler: _processData,
+      defaultSidProvider: () => systemConfiguration?.defaultSid ?? 0,
+      volumeProvider: () => systemConfiguration?.volume ?? 0,
+      currentChannelProvider: () => _sxiLayer.appState.currentChannel,
+      currentSidProvider: () => _sxiLayer.appState.currentSid,
+      currentCategoryProvider: () => _sxiLayer.appState.currentCategory,
+      resolveChannelFromSid: (int sid) =>
+          _sxiLayer.appState.getChannelIdFromSid(sid),
+      resolveSidFromChannel: (int channel) =>
+          _sxiLayer.appState.getSidFromChannelId(channel),
+      emitSxiIndication: _emitTranslatedSxiIndication,
+      markRx: _markRx,
+      startHeartbeatMonitor: _startHeartbeatMonitor,
+      updateConnectionDetail: _updateConnectionDetail,
+      reportError: onError,
+      updateRadioId: (List<int> radioId) =>
+          _sxiLayer.appState.updateRadioId(radioId),
+      updateChannelData: (int sid, String artist, String song, int programId) =>
+          _sxiLayer.appState.updateChannelData(sid, artist, song, programId),
+    );
+  }
+
+  void _emitTranslatedSxiIndication(SXiPayload payload) {
+    final DeviceMessage message =
+        DeviceMessage(incrementSequence(), PayloadType.control, payload);
+    _receiveController.add(message);
+    _sxiLayer.processMessage(message);
+  }
 
   // Read-only stream of device messages
   Stream<DeviceMessage> get messageStream => _receiveController.stream;
+  DeviceProtocol get activeProtocol => _activeProtocol;
 
   void _updateConnectionDetail(String details,
       {String title = 'Connecting...'}) {
@@ -100,25 +149,64 @@ class DeviceLayer {
     logger.i('Timing stage: $stage, result: $result, elapsed: ${elapsedMs}ms');
   }
 
+  void _markRx() {
+    _lastValidMessage = DateTime.now();
+    if (!_firstRxSeen) {
+      _firstRxSeen = true;
+      _finishTiming(TimingStage.openStartToFirstRx);
+    }
+  }
+
   Future<bool> startupSequence() async {
     _initialized = false;
+    _activeProtocol = DeviceProtocol.sxi;
+    _sxiLayer.appState.setXmTunerMode(false);
     _firstRxSeen = false;
     _timingStarts.clear();
+    _buffer = Uint8List(0);
+    _xmAdapter.reset();
     _sxiLayer.deviceLayer = this;
     _stopHeartbeatMonitor();
 
     _updateConnectionDetail('Starting...');
 
     if (!_isNetworkPort()) {
-      // If the device has not initialized, we have to connect at 57600 baud
-      if (await _attemptInitializationAtBaudRate(57600)) {
-        return await _finalizeConnection();
+      final bool allowSxi =
+          preferredProtocol != DeviceProtocolPreference.xmOnly;
+      final bool allowXm =
+          preferredProtocol != DeviceProtocolPreference.sxiOnly;
+
+      if (allowSxi) {
+        // If the device has not initialized, we have to connect at 57600 baud
+        if (await _attemptInitializationAtBaudRate(57600)) {
+          return await _finalizeConnection();
+        }
+
+        // If the device has initialized, we can connect at any other supported baud
+        final int desiredSecondaryBaud = _sxiLayer.appState.secondaryBaudRate;
+        if (await _attemptConnectionAtBaudRate(desiredSecondaryBaud)) {
+          return await _finalizeConnection(anyDeviceMessage: true);
+        }
       }
 
-      // If the device has initialized, we can connect at any other supported baud
-      final int desiredSecondaryBaud = _sxiLayer.appState.secondaryBaudRate;
-      if (await _attemptConnectionAtBaudRate(desiredSecondaryBaud)) {
-        return await _finalizeConnection(anyDeviceMessage: true);
+      // Support XM devices
+      if (allowXm) {
+        // Route RX through XM parser while probing XM protocol
+        logger.d('Protocol probe: entering XM mode');
+        _activeProtocol = DeviceProtocol.xm;
+        final bool xmOk = await _xmAdapter.attemptStartup(
+          initTimeout: initResponseTimeout,
+          maxRxBufferBytes: maxRxBufferBytes,
+        );
+        if (xmOk) {
+          logger.d('Protocol probe result: XM connected');
+          _initialized = true;
+          _sxiLayer.appState.setXmTunerMode(true);
+          return true;
+        }
+        logger.w('Protocol probe: XM not detected, returning to SXi mode');
+        _activeProtocol = DeviceProtocol.sxi;
+        _sxiLayer.appState.setXmTunerMode(false);
       }
     } else {
       // For UART-over-IP, open once at the network init baud (57600)
@@ -180,7 +268,11 @@ class DeviceLayer {
       return false;
     }
 
-    onError?.call('Failed to Connect to Device', true);
+    final String serialError = (_serialHelper.getLastError() ?? '').trim();
+    final String details = serialError.isEmpty
+        ? 'Failed to Connect to Device'
+        : 'Failed to Connect to Device\n$serialError';
+    onError?.call(details, true);
     _stopHeartbeatMonitor();
     return false;
   }
@@ -360,6 +452,14 @@ class DeviceLayer {
 
   // Process the raw data from the device
   void _processData(Uint8List data) {
+    if (_activeProtocol == DeviceProtocol.xm) {
+      _xmAdapter.processData(data, maxRxBufferBytes: maxRxBufferBytes);
+      return;
+    }
+    _processSxiData(data);
+  }
+
+  void _processSxiData(Uint8List data) {
     // Append raw bytes and trace if enabled
     if (FrameTracer.instance.isEnabled) {
       // We write the raw RX chunk; complete frames are logged below
@@ -367,10 +467,8 @@ class DeviceLayer {
     }
 
     // Treat any received bytes as heartbeat
-    _lastValidMessage = DateTime.now();
-    if (!_firstRxSeen && data.isNotEmpty) {
-      _firstRxSeen = true;
-      _finishTiming(TimingStage.openStartToFirstRx);
+    if (data.isNotEmpty) {
+      _markRx();
     }
     _buffer = Uint8List.fromList(_buffer + data);
 
@@ -473,6 +571,9 @@ class DeviceLayer {
   // Close the device layer
   Future<void> close() async {
     _buffer = Uint8List(0);
+    _xmAdapter.reset();
+    _activeProtocol = DeviceProtocol.sxi;
+    _sxiLayer.appState.setXmTunerMode(false);
     try {
       await _serialHelper.closePort();
     } catch (_) {}
@@ -486,8 +587,14 @@ class DeviceLayer {
       return null;
     }
 
-    logger.t('Send Control Command: $payload');
     _markAudioResumeIntentIfNeeded(payload);
+
+    if (_activeProtocol == DeviceProtocol.xm) {
+      _xmAdapter.sendMappedCommand(payload);
+      return null;
+    }
+
+    logger.t('Send Control Command: $payload');
 
     // Increment the sequence number
     final sequence = incrementSequence();
@@ -501,6 +608,11 @@ class DeviceLayer {
     _sxiLayer.cycleState();
 
     return message;
+  }
+
+  void requestGuideWalkIfStale() {
+    if (_activeProtocol != DeviceProtocol.xm) return;
+    _xmAdapter.requestGuideWalkIfStale();
   }
 
   void _markAudioResumeIntentIfNeeded(SXiPayload payload) {
@@ -567,6 +679,9 @@ class DeviceLayer {
   // Build an acknowledgement message
   Future<void> buildAck(
       DeviceMessage message, List<int>? additionalPayload) async {
+    if (_activeProtocol == DeviceProtocol.xm) {
+      return;
+    }
     final int opcodeMsb = message.payload.opcodeMsb;
     final int opcodeLsb = message.payload.opcodeLsb;
     final int transactionID = message.payload.transactionID;
@@ -702,6 +817,11 @@ class DeviceLayer {
 
   // Send the module configuration payload
   Future<void> sendConfigPayload() async {
+    if (_activeProtocol == DeviceProtocol.xm) {
+      await _xmAdapter.sendConfigPayload();
+      return;
+    }
+
     int volume = systemConfiguration?.volume ?? 0;
     int defaultSid = systemConfiguration?.defaultSid ?? 0;
     List<int> eq = systemConfiguration?.eq ?? List<int>.filled(10, 0);

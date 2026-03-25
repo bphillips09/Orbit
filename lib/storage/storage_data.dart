@@ -186,6 +186,7 @@ class StorageData {
         case SaveDataType.lastSid:
         case SaveDataType.lastPort:
         case SaveDataType.lastPortTransport:
+        case SaveDataType.preferredDeviceProtocol:
         case SaveDataType.lastAudioDevice:
         case SaveDataType.audioOutputRoute:
         case SaveDataType.enableAudio:
@@ -263,6 +264,7 @@ class StorageData {
         case SaveDataType.lastSid:
         case SaveDataType.lastPort:
         case SaveDataType.lastPortTransport:
+        case SaveDataType.preferredDeviceProtocol:
         case SaveDataType.lastAudioDevice:
         case SaveDataType.audioOutputRoute:
         case SaveDataType.enableAudio:
@@ -429,6 +431,7 @@ enum SaveDataType {
   lastSid,
   lastPort,
   lastPortTransport,
+  preferredDeviceProtocol,
   lastAudioDevice,
   audioOutputRoute,
   enableAudio,

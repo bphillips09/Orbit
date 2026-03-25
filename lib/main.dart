@@ -365,10 +365,32 @@ class MainPageState extends State<MainPage>
 
   bool get isStartupGateVisible => _startupGateVisible;
 
+  DeviceProtocolPreference _parsePreferredProtocol(Object? raw) {
+    final String value = (raw ?? '').toString().trim();
+    for (final pref in DeviceProtocolPreference.values) {
+      if (pref.name == value) {
+        return pref;
+      }
+    }
+    return DeviceProtocolPreference.auto;
+  }
+
+  DeviceProtocolPreference _normalizePreferredProtocolForTransport(
+    DeviceProtocolPreference pref,
+    SerialTransport transport,
+  ) {
+    if (transport == SerialTransport.network &&
+        pref == DeviceProtocolPreference.xmOnly) {
+      return DeviceProtocolPreference.sxiOnly;
+    }
+    return pref;
+  }
+
   Future<bool> connectToPort(
     String portString,
     Object? portObject, {
     SerialTransport transport = SerialTransport.serial,
+    DeviceProtocolPreference preferredProtocol = DeviceProtocolPreference.auto,
     bool persistPort = true,
   }) async {
     _userRequestedDisconnect = false;
@@ -387,6 +409,10 @@ class MainPageState extends State<MainPage>
         await appState.storageData.save(SaveDataType.lastPort, portString);
         await appState.storageData
             .save(SaveDataType.lastPortTransport, transport.name);
+        await appState.storageData.save(
+          SaveDataType.preferredDeviceProtocol,
+          preferredProtocol.name,
+        );
       } catch (_) {}
     }
 
@@ -397,8 +423,13 @@ class MainPageState extends State<MainPage>
     // Make sure we have a fresh protocol layer bound to the new device layer
     sxiLayer = SXiLayer(appState);
 
-    final bool ok =
-        await tryStartup(portString, portObject, transport: transport);
+    final bool ok = await tryStartup(
+      portString,
+      portObject,
+      transport: transport,
+      preferredProtocol:
+          _normalizePreferredProtocolForTransport(preferredProtocol, transport),
+    );
     _suppressFatalConnectionDialogs = prevSuppress;
 
     if (!ok) {
@@ -455,8 +486,12 @@ class MainPageState extends State<MainPage>
   }
 
   Future<void> _connectFromStartupGate() async {
-    final (SerialTransport, String, Object?) selection =
-        await _promptForConnection(
+    final (
+      SerialTransport,
+      String,
+      Object?,
+      DeviceProtocolPreference
+    ) selection = await _promptForConnection(
       previousNetworkSpec: null,
       canDismissSerial: true,
       barrierDismissible: true,
@@ -466,12 +501,18 @@ class MainPageState extends State<MainPage>
     final SerialTransport transport = selection.$1;
     final String portString = selection.$2;
     final Object? portObject = selection.$3;
+    final DeviceProtocolPreference preferredProtocol = selection.$4;
     if (portString.isEmpty && portObject == null) {
       _showStartupGate(
           _startupGateMessage.isEmpty ? 'Not connected.' : _startupGateMessage);
       return;
     }
-    await connectToPort(portString, portObject, transport: transport);
+    await connectToPort(
+      portString,
+      portObject,
+      transport: transport,
+      preferredProtocol: preferredProtocol,
+    );
   }
 
   // Show a dialog if the startup sequence fails
@@ -545,6 +586,10 @@ class MainPageState extends State<MainPage>
           "";
       final String? lastPortTransportString =
           await appState.storageData.load(SaveDataType.lastPortTransport);
+      final DeviceProtocolPreference preferredProtocol =
+          _parsePreferredProtocol(
+        await appState.storageData.load(SaveDataType.preferredDeviceProtocol),
+      );
       Object? lastPortObject;
 
       if (lastPortString.isEmpty) {
@@ -571,9 +616,13 @@ class MainPageState extends State<MainPage>
         return;
       }
 
+      appState.resetGuideUpdateIndicatorsForNewConnection();
+
       final bool startupSuccess = await tryStartup(
           lastPortString, lastPortObject,
-          transport: transport);
+          transport: transport,
+          preferredProtocol: _normalizePreferredProtocolForTransport(
+              preferredProtocol, transport));
       if (!startupSuccess) {
         final err = (_lastStartupConnectionError ?? '').trim();
         _showStartupGate(err.isEmpty
@@ -611,6 +660,7 @@ class MainPageState extends State<MainPage>
     String portString,
     Object? portObject, {
     SerialTransport transport = SerialTransport.serial,
+    DeviceProtocolPreference preferredProtocol = DeviceProtocolPreference.auto,
   }) async {
     if (mounted) {
       setState(() {
@@ -649,10 +699,19 @@ class MainPageState extends State<MainPage>
           portString,
           portObject,
           transport: transport,
+          preferredProtocol: preferredProtocol,
         );
         if (success) {
           _userRequestedDisconnect = false;
           return true;
+        }
+
+        final String lastError = (_lastStartupConnectionError ?? '').trim();
+        final bool openFailed = _isImmediatePortOpenFailure(lastError);
+        if (openFailed) {
+          logger.w(
+              'Startup retry loop stopped early due to immediate port-open failure: $lastError');
+          break;
         }
 
         if (retryIndex < totalRetries) {
@@ -674,10 +733,18 @@ class MainPageState extends State<MainPage>
     }
   }
 
+  bool _isImmediatePortOpenFailure(String details) {
+    if (details.isEmpty) return false;
+    return details.contains('openReadWrite() returned false') ||
+        details.contains('Failed to open') ||
+        details.contains('UART open exception');
+  }
+
   Future<bool> _tryStartupSingleAttempt(
     String portString,
     Object? portObject, {
     SerialTransport transport = SerialTransport.serial,
+    DeviceProtocolPreference preferredProtocol = DeviceProtocolPreference.auto,
   }) async {
     try {
       // Ensure any existing connection is closed before creating a new one
@@ -692,6 +759,7 @@ class MainPageState extends State<MainPage>
           portObject,
           initialBaudRate,
           transport: transport,
+          preferredProtocol: preferredProtocol,
           systemConfiguration: _loadedConfig,
           onConnectionDetailChanged: onConnectionDetailsUpdated,
           onMessage: onMessage,
@@ -704,6 +772,7 @@ class MainPageState extends State<MainPage>
           portString,
           initialBaudRate,
           transport: transport,
+          preferredProtocol: preferredProtocol,
           systemConfiguration: _loadedConfig,
           onConnectionDetailChanged: onConnectionDetailsUpdated,
           onMessage: onMessage,
@@ -737,6 +806,20 @@ class MainPageState extends State<MainPage>
 
       final success = await deviceLayer.startupSequence();
       _deviceConnected = success;
+      if (success &&
+          transport == SerialTransport.serial &&
+          preferredProtocol == DeviceProtocolPreference.auto) {
+        final DeviceProtocolPreference resolved =
+            deviceLayer.activeProtocol == DeviceProtocol.xm
+                ? DeviceProtocolPreference.xmOnly
+                : DeviceProtocolPreference.sxiOnly;
+        unawaited(
+          appState.storageData.save(
+            SaveDataType.preferredDeviceProtocol,
+            resolved.name,
+          ),
+        );
+      }
       return success;
     } catch (e) {
       _lastStartupConnectionError = e.toString();
@@ -1573,6 +1656,9 @@ class MainPageState extends State<MainPage>
 
   // Show the EPG dialog
   Future<int> _showSelectChannelFromEPG({int? initialCategory}) async {
+    try {
+      deviceLayer.requestGuideWalkIfStale();
+    } catch (_) {}
     return await EpgDialogHelper.showEpgDialog(
       context: context,
       appState: appState,
@@ -1745,7 +1831,8 @@ class MainPageState extends State<MainPage>
     );
   }
 
-  Future<(SerialTransport, String, Object?)> _promptForConnection({
+  Future<(SerialTransport, String, Object?, DeviceProtocolPreference)>
+      _promptForConnection({
     String? previousNetworkSpec,
     bool canDismissSerial = false,
     bool barrierDismissible = false,
@@ -1759,20 +1846,40 @@ class MainPageState extends State<MainPage>
         message: message,
       );
       if (!mounted) {
-        return (SerialTransport.serial, '', null);
+        return (
+          SerialTransport.serial,
+          '',
+          null,
+          DeviceProtocolPreference.auto
+        );
       }
       if (transport == null) {
-        return (SerialTransport.serial, '', null);
+        return (
+          SerialTransport.serial,
+          '',
+          null,
+          DeviceProtocolPreference.auto
+        );
       }
       if (transport == SerialTransport.network && !kIsWeb && !kIsWasm) {
         final String? spec = await ConnectionDialogs.showNetworkConfig(context);
         if (!mounted) {
-          return (SerialTransport.serial, '', null);
+          return (
+            SerialTransport.serial,
+            '',
+            null,
+            DeviceProtocolPreference.auto
+          );
         }
         if (spec == null) {
           continue;
         }
-        return (SerialTransport.network, spec, null);
+        return (
+          SerialTransport.network,
+          spec,
+          null,
+          DeviceProtocolPreference.sxiOnly
+        );
       } else if (transport == SerialTransport.serial) {
         final (String, Object?) res = await ConnectionDialogs.selectSerialPort(
           context,
@@ -1781,14 +1888,54 @@ class MainPageState extends State<MainPage>
           canDismiss: canDismissSerial,
         );
         if (!mounted) {
-          return (SerialTransport.serial, '', null);
+          return (
+            SerialTransport.serial,
+            '',
+            null,
+            DeviceProtocolPreference.auto
+          );
         }
         if (res.$1.isEmpty && res.$2 == null) {
           continue;
         }
-        return (SerialTransport.serial, res.$1, res.$2);
+        final DeviceProtocolPreference initialPreference =
+            _parsePreferredProtocol(
+          await appState.storageData.load(SaveDataType.preferredDeviceProtocol),
+        );
+        if (!mounted) {
+          return (
+            SerialTransport.serial,
+            '',
+            null,
+            DeviceProtocolPreference.auto
+          );
+        }
+        final DeviceProtocolPreference? picked =
+            await ConnectionDialogs.showDeviceProfilePicker(
+          context,
+          initialPreference: initialPreference,
+          allowXm: true,
+          barrierDismissible: barrierDismissible,
+        );
+        if (!mounted) {
+          return (
+            SerialTransport.serial,
+            '',
+            null,
+            DeviceProtocolPreference.auto
+          );
+        }
+        if (picked == null) {
+          continue;
+        }
+        return (SerialTransport.serial, res.$1, res.$2, picked);
       } else {
-        return (SerialTransport.serial, '', null);
+        return (
+          SerialTransport.serial,
+          '',
+          null,
+          DeviceProtocolPreference.auto
+        );
       }
     }
   }
@@ -1796,7 +1943,8 @@ class MainPageState extends State<MainPage>
   // Build the text that may show in the app bar
   Widget _buildAppBarTitle(BuildContext context, AppState appState) {
     // If any favorites are on air, show a centered quick-access button
-    if (appState.showOnAirFavoritesPrompt &&
+    if (!appState.isXmTuner &&
+        appState.showOnAirFavoritesPrompt &&
         appState.favoritesOnAirEntries.isNotEmpty &&
         _lastOnAirPromptAt != null) {
       final hasSong = appState.favoritesOnAirEntries
@@ -1834,10 +1982,10 @@ class MainPageState extends State<MainPage>
         'Updating ${appState.updatingChannels ? 'Channels' : 'Categories'}...',
       );
     }
-    if (appState.isScanActive) {
+    if (!appState.isXmTuner && appState.isScanActive) {
       return Text('Scanning Presets...');
     }
-    if (appState.isTuneMixActive) {
+    if (!appState.isXmTuner && appState.isTuneMixActive) {
       return Text('Presets Mix');
     }
     return const SizedBox.shrink();
@@ -1882,47 +2030,48 @@ class MainPageState extends State<MainPage>
                 ),
                 actions: [
                   if (appState.smallScreenMode) ...[
-                    IconButton(
-                      tooltip: appState.isScanActive
-                          ? 'Stop and Listen'
-                          : (activePresets >= 2
-                              ? 'Scan Presets'
-                              : 'Not Enough Presets'),
-                      icon: Icon(
-                        appState.isScanActive ? Icons.close : Icons.scanner,
-                      ),
-                      iconSize: bigAppBar ? 30 : 24,
-                      padding: EdgeInsets.all(bigAppBar ? 14 : 8),
-                      constraints: BoxConstraints(
-                        minWidth: bigAppBar ? 64 : 48,
-                        minHeight: bigAppBar ? 64 : 48,
-                      ),
-                      onPressed: (appState.isScanActive || activePresets >= 2)
-                          ? () {
-                              if (appState.isScanActive) {
-                                final cfgCmd = SXiSelectChannelCommand(
-                                  ChanSelectionType
-                                      .stopScanAndContinuePlaybackOfCurrentTrack,
-                                  0,
-                                  appState.currentCategory,
-                                  ChannelAttributes.all(),
-                                  AudioRoutingType.routeToAudio,
-                                );
-                                deviceLayer.sendControlCommand(cfgCmd);
-                              } else {
-                                final cfgCmd = SXiSelectChannelCommand(
-                                  ChanSelectionType
-                                      .scanSmartFavoriteMusicOnlyContent,
-                                  0,
-                                  appState.currentCategory,
-                                  ChannelAttributes.all(),
-                                  AudioRoutingType.routeToAudio,
-                                );
-                                deviceLayer.sendControlCommand(cfgCmd);
+                    if (!appState.isXmTuner)
+                      IconButton(
+                        tooltip: appState.isScanActive
+                            ? 'Stop and Listen'
+                            : (activePresets >= 2
+                                ? 'Scan Presets'
+                                : 'Not Enough Presets'),
+                        icon: Icon(
+                          appState.isScanActive ? Icons.close : Icons.scanner,
+                        ),
+                        iconSize: bigAppBar ? 30 : 24,
+                        padding: EdgeInsets.all(bigAppBar ? 14 : 8),
+                        constraints: BoxConstraints(
+                          minWidth: bigAppBar ? 64 : 48,
+                          minHeight: bigAppBar ? 64 : 48,
+                        ),
+                        onPressed: (appState.isScanActive || activePresets >= 2)
+                            ? () {
+                                if (appState.isScanActive) {
+                                  final cfgCmd = SXiSelectChannelCommand(
+                                    ChanSelectionType
+                                        .stopScanAndContinuePlaybackOfCurrentTrack,
+                                    0,
+                                    appState.currentCategory,
+                                    ChannelAttributes.all(),
+                                    AudioRoutingType.routeToAudio,
+                                  );
+                                  deviceLayer.sendControlCommand(cfgCmd);
+                                } else {
+                                  final cfgCmd = SXiSelectChannelCommand(
+                                    ChanSelectionType
+                                        .scanSmartFavoriteMusicOnlyContent,
+                                    0,
+                                    appState.currentCategory,
+                                    ChannelAttributes.all(),
+                                    AudioRoutingType.routeToAudio,
+                                  );
+                                  deviceLayer.sendControlCommand(cfgCmd);
+                                }
                               }
-                            }
-                          : null,
-                    ),
+                            : null,
+                      ),
                     IconButton(
                       tooltip: appState.updatingChannels
                           ? 'Channel Update in Progress'
@@ -1940,46 +2089,49 @@ class MainPageState extends State<MainPage>
                               _showSelectChannelFromEPG();
                             },
                     ),
-                    IconButton(
-                      tooltip: appState.isTuneMixActive
-                          ? 'Stop Mix'
-                          : (activePresets >= 2
-                              ? 'Start Presets Mix'
-                              : 'Not Enough Presets'),
-                      icon: Icon(
-                        appState.isTuneMixActive ? Icons.close : Icons.shuffle,
-                      ),
-                      iconSize: bigAppBar ? 30 : 24,
-                      padding: EdgeInsets.all(bigAppBar ? 14 : 8),
-                      constraints: BoxConstraints(
-                        minWidth: bigAppBar ? 64 : 48,
-                        minHeight: bigAppBar ? 64 : 48,
-                      ),
-                      onPressed:
-                          (appState.isTuneMixActive || activePresets >= 2)
-                              ? () {
-                                  if (appState.isTuneMixActive) {
-                                    final cfgCmd = SXiSelectChannelCommand(
-                                      ChanSelectionType.tuneUsingChannelNumber,
-                                      appState.currentChannel,
-                                      appState.currentCategory,
-                                      ChannelAttributes.all(),
-                                      AudioRoutingType.routeToAudio,
-                                    );
-                                    deviceLayer.sendControlCommand(cfgCmd);
-                                  } else {
-                                    final cfgCmd = SXiSelectChannelCommand(
-                                      ChanSelectionType.tuneUsingSID,
-                                      0x1001,
-                                      appState.currentCategory,
-                                      ChannelAttributes.all(),
-                                      AudioRoutingType.routeToAudio,
-                                    );
-                                    deviceLayer.sendControlCommand(cfgCmd);
-                                  }
+                    if (!appState.isXmTuner)
+                      IconButton(
+                        tooltip: appState.isTuneMixActive
+                            ? 'Stop Mix'
+                            : (activePresets >= 2
+                                ? 'Start Presets Mix'
+                                : 'Not Enough Presets'),
+                        icon: Icon(
+                          appState.isTuneMixActive
+                              ? Icons.close
+                              : Icons.shuffle,
+                        ),
+                        iconSize: bigAppBar ? 30 : 24,
+                        padding: EdgeInsets.all(bigAppBar ? 14 : 8),
+                        constraints: BoxConstraints(
+                          minWidth: bigAppBar ? 64 : 48,
+                          minHeight: bigAppBar ? 64 : 48,
+                        ),
+                        onPressed: (appState.isTuneMixActive ||
+                                activePresets >= 2)
+                            ? () {
+                                if (appState.isTuneMixActive) {
+                                  final cfgCmd = SXiSelectChannelCommand(
+                                    ChanSelectionType.tuneUsingChannelNumber,
+                                    appState.currentChannel,
+                                    appState.currentCategory,
+                                    ChannelAttributes.all(),
+                                    AudioRoutingType.routeToAudio,
+                                  );
+                                  deviceLayer.sendControlCommand(cfgCmd);
+                                } else {
+                                  final cfgCmd = SXiSelectChannelCommand(
+                                    ChanSelectionType.tuneUsingSID,
+                                    0x1001,
+                                    appState.currentCategory,
+                                    ChannelAttributes.all(),
+                                    AudioRoutingType.routeToAudio,
+                                  );
+                                  deviceLayer.sendControlCommand(cfgCmd);
                                 }
-                              : null,
-                    ),
+                              }
+                            : null,
+                      ),
                   ],
                   IconButton(
                     icon: const Icon(Icons.settings),
@@ -2116,13 +2268,15 @@ class MainPageState extends State<MainPage>
                                         children: [
                                           // Album Art
                                           GestureDetector(
-                                            onTap: () {
-                                              FavoriteDialogHelper.show(
-                                                context: context,
-                                                appState: appState,
-                                                deviceLayer: deviceLayer,
-                                              );
-                                            },
+                                            onTap: appState.isXmTuner
+                                                ? null
+                                                : () {
+                                                    FavoriteDialogHelper.show(
+                                                      context: context,
+                                                      appState: appState,
+                                                      deviceLayer: deviceLayer,
+                                                    );
+                                                  },
                                             child: AlbumArt(
                                               size: appState.smallScreenMode
                                                   ? 140
@@ -2168,13 +2322,17 @@ class MainPageState extends State<MainPage>
                                                 ),
                                                 SizedBox(height: 8),
                                                 GestureDetector(
-                                                  onTap: () {
-                                                    FavoriteDialogHelper.show(
-                                                      context: context,
-                                                      appState: appState,
-                                                      deviceLayer: deviceLayer,
-                                                    );
-                                                  },
+                                                  onTap: appState.isXmTuner
+                                                      ? null
+                                                      : () {
+                                                          FavoriteDialogHelper
+                                                              .show(
+                                                            context: context,
+                                                            appState: appState,
+                                                            deviceLayer:
+                                                                deviceLayer,
+                                                          );
+                                                        },
                                                   child: Text(
                                                     appState
                                                         .nowPlaying.songTitle,
@@ -2194,13 +2352,17 @@ class MainPageState extends State<MainPage>
                                                 ),
                                                 SizedBox(height: 8),
                                                 GestureDetector(
-                                                  onTap: () {
-                                                    FavoriteDialogHelper.show(
-                                                      context: context,
-                                                      appState: appState,
-                                                      deviceLayer: deviceLayer,
-                                                    );
-                                                  },
+                                                  onTap: appState.isXmTuner
+                                                      ? null
+                                                      : () {
+                                                          FavoriteDialogHelper
+                                                              .show(
+                                                            context: context,
+                                                            appState: appState,
+                                                            deviceLayer:
+                                                                deviceLayer,
+                                                          );
+                                                        },
                                                   child: Text(
                                                     appState
                                                         .nowPlaying.artistTitle,
@@ -2234,19 +2396,21 @@ class MainPageState extends State<MainPage>
                                             : <Widget>[
                                                 // Channel Controls
                                                 _buildChannelControls(),
-                                                SizedBox(width: 32),
-                                                // Vertical Separator
-                                                Container(
-                                                  width: 1,
-                                                  height: 60,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .outline
-                                                      .withValues(alpha: 0.3),
-                                                ),
-                                                SizedBox(width: 32),
-                                                // Playback Controls
-                                                _buildPlaybackControls(),
+                                                if (!appState.isXmTuner) ...[
+                                                  SizedBox(width: 32),
+                                                  // Vertical Separator
+                                                  Container(
+                                                    width: 1,
+                                                    height: 60,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .outline
+                                                        .withValues(alpha: 0.3),
+                                                  ),
+                                                  SizedBox(width: 32),
+                                                  // Playback Controls
+                                                  _buildPlaybackControls(),
+                                                ],
                                               ],
                                       ),
                                       if (!appState.smallScreenMode) ...[
@@ -2354,13 +2518,15 @@ class MainPageState extends State<MainPage>
                             const SizedBox(height: 10),
                             // Current track album art
                             GestureDetector(
-                              onTap: () {
-                                FavoriteDialogHelper.show(
-                                  context: context,
-                                  appState: appState,
-                                  deviceLayer: deviceLayer,
-                                );
-                              },
+                              onTap: appState.isXmTuner
+                                  ? null
+                                  : () {
+                                      FavoriteDialogHelper.show(
+                                        context: context,
+                                        appState: appState,
+                                        deviceLayer: deviceLayer,
+                                      );
+                                    },
                               child: AlbumArt(
                                 size: 128,
                                 filterQuality: FilterQuality.high,
@@ -2379,13 +2545,15 @@ class MainPageState extends State<MainPage>
                             const SizedBox(height: 10),
                             // Current track
                             GestureDetector(
-                              onTap: () {
-                                FavoriteDialogHelper.show(
-                                  context: context,
-                                  appState: appState,
-                                  deviceLayer: deviceLayer,
-                                );
-                              },
+                              onTap: appState.isXmTuner
+                                  ? null
+                                  : () {
+                                      FavoriteDialogHelper.show(
+                                        context: context,
+                                        appState: appState,
+                                        deviceLayer: deviceLayer,
+                                      );
+                                    },
                               child: Text(
                                 appState.nowPlaying.songTitle,
                                 style: TextStyle(fontSize: 20),
@@ -2397,13 +2565,15 @@ class MainPageState extends State<MainPage>
                             ),
                             // Current artist
                             GestureDetector(
-                              onTap: () {
-                                FavoriteDialogHelper.show(
-                                  context: context,
-                                  appState: appState,
-                                  deviceLayer: deviceLayer,
-                                );
-                              },
+                              onTap: appState.isXmTuner
+                                  ? null
+                                  : () {
+                                      FavoriteDialogHelper.show(
+                                        context: context,
+                                        appState: appState,
+                                        deviceLayer: deviceLayer,
+                                      );
+                                    },
                               child: Text(
                                 appState.nowPlaying.artistTitle,
                                 style:
@@ -2685,6 +2855,50 @@ class MainPageState extends State<MainPage>
         : const EdgeInsets.symmetric(horizontal: 12);
     final int activePresets = appState.presets.where((p) => p.sid != 0).length;
 
+    if (appState.isXmTuner) {
+      return Padding(
+        padding: padding,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 220,
+              child: Tooltip(
+                message: appState.updatingChannels
+                    ? 'Channel Update in Progress'
+                    : 'Program Guide',
+                child: SizedBox(
+                  height: buttonHeight,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: Size.fromHeight(buttonHeight),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      backgroundColor: cs.surfaceContainer,
+                      foregroundColor: cs.onSurface,
+                      side: BorderSide(
+                        color: cs.outline.withValues(alpha: 0.3),
+                        width: 1.0,
+                      ),
+                    ),
+                    onPressed: appState.updatingChannels
+                        ? null
+                        : () {
+                            _showSelectChannelFromEPG();
+                          },
+                    icon: const Icon(Icons.view_list),
+                    label: const Text('Guide'),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Padding(
       padding: padding,
       child: Row(
@@ -2873,6 +3087,9 @@ class MainPageState extends State<MainPage>
 
   // Build the playback controls
   Widget _buildPlaybackControls() {
+    if (appState.isXmTuner) {
+      return const SizedBox.shrink();
+    }
     final bool small = appState.smallScreenMode;
     final bool bigControls = small && isLandscape(context);
     final double favoriteIconSize = bigControls ? 36 : 28;

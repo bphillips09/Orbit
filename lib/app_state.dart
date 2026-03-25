@@ -57,6 +57,7 @@ class AppState extends ChangeNotifier {
   bool restartPending = false;
   bool isScanActive = false;
   bool isTuneMixActive = false;
+  bool _isXmTuner = false;
   ThemeMode themeMode = ThemeMode.dark;
   double textScale = 1.0;
   double uiScale = 720;
@@ -134,6 +135,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setXmTunerMode(bool value) {
+    if (_isXmTuner == value) return;
+    _isXmTuner = value;
+    notifyListeners();
+  }
+
   String _moduleType = '';
   String _moduleHWRev = '';
   String _moduleSWRev = '';
@@ -179,6 +186,7 @@ class AppState extends ChangeNotifier {
   bool get audioPresence => _audioExpected;
   bool get hasAudioFocus => _hasAudioFocus;
   int get audioDecoderBitrate => _audioDecoderBitrate;
+  bool get isXmTuner => _isXmTuner;
 
   // System info getters
   String get moduleType => _moduleType;
