@@ -1295,22 +1295,6 @@ class XmProtocolAdapter {
     //emitSxiIndication(SXiTimeIndication.fromBytes(frame));
   }
 
-  void _emitSxiSystemEvent(List<int> data) {
-    final List<int> eventData = <int>[
-      ...data.take(20),
-      ...List<int>.filled((20 - data.length).clamp(0, 20), 0x00),
-    ];
-    final List<int> frame = <int>[
-      0x80,
-      0x80,
-      0x00,
-      EventCode.systemInformation.value,
-      ...eventData,
-    ];
-
-    emitSxiIndication(SXiEventIndication.fromBytes(frame));
-  }
-
   String _statusMessage(List<int> payload) {
     if (payload.length < 3) {
       return 'XM protocol device reported an error';
