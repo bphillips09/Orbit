@@ -62,11 +62,17 @@ class _FavoritesOnAirDialogState extends State<FavoritesOnAirDialog> {
       DialogMediaKeyNavigation.unregister(_mediaKeyBindingToken!);
       _mediaKeyBindingToken = null;
     }
+    _changeFocusHighlightStrategy(FocusHighlightStrategy.automatic);
     super.dispose();
+  }
+
+  void _changeFocusHighlightStrategy(FocusHighlightStrategy strategy) {
+    FocusManager.instance.highlightStrategy = strategy;
   }
 
   Future<bool> _handleTrackNavigate(bool forward) async {
     if (!mounted) return false;
+    _changeFocusHighlightStrategy(FocusHighlightStrategy.alwaysTraditional);
     final BuildContext actionContext =
         FocusManager.instance.primaryFocus?.context ?? context;
     Actions.invoke(
@@ -80,6 +86,7 @@ class _FavoritesOnAirDialogState extends State<FavoritesOnAirDialog> {
 
   Future<bool> _handleSelect() async {
     if (!mounted) return false;
+    _changeFocusHighlightStrategy(FocusHighlightStrategy.alwaysTraditional);
     final BuildContext actionContext =
         FocusManager.instance.primaryFocus?.context ?? context;
     Actions.invoke(actionContext, const ActivateIntent());

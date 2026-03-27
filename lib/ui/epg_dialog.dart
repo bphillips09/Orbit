@@ -100,6 +100,7 @@ class _EpgDialogState extends State<EpgDialog> {
       DialogMediaKeyNavigation.unregister(_mediaKeyBindingToken!);
       _mediaKeyBindingToken = null;
     }
+    _changeFocusHighlightStrategy(FocusHighlightStrategy.automatic);
     _searchFocusNode.dispose();
     _debounce?.cancel();
     super.dispose();
@@ -140,6 +141,10 @@ class _EpgDialogState extends State<EpgDialog> {
     );
   }
 
+  void _changeFocusHighlightStrategy(FocusHighlightStrategy strategy) {
+    FocusManager.instance.highlightStrategy = strategy;
+  }
+
   List<ChannelData> _buildFilteredChannels() {
     final List<ChannelData> baseList = _sortedChannels
         .where((channel) =>
@@ -178,6 +183,7 @@ class _EpgDialogState extends State<EpgDialog> {
 
   Future<bool> _handleTrackNavigate(bool forward) async {
     if (!mounted) return false;
+    _changeFocusHighlightStrategy(FocusHighlightStrategy.alwaysTraditional);
     if (_searchFocusNode.hasFocus) {
       _searchFocusNode.unfocus();
     }
@@ -194,6 +200,7 @@ class _EpgDialogState extends State<EpgDialog> {
 
   Future<bool> _handleSelect() async {
     if (!mounted) return false;
+    _changeFocusHighlightStrategy(FocusHighlightStrategy.alwaysTraditional);
     final BuildContext actionContext =
         FocusManager.instance.primaryFocus?.context ?? context;
     Actions.invoke(actionContext, const ActivateIntent());
