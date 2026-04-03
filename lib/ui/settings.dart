@@ -260,6 +260,19 @@ class SettingsPage extends StatelessWidget {
               'Appearance',
               Icons.palette,
               [
+                if (!kIsWeb && !kIsWasm && Platform.isAndroid) ...[
+                  _buildSwitchTile(
+                    context,
+                    'Immersive Mode',
+                    'Hide status and navigation bars (fullscreen)',
+                    Icons.fullscreen,
+                    value: appState.androidImmersiveMode,
+                    onChanged: (value) {
+                      appState.updateAndroidImmersiveMode(value);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 _buildSwitchTile(
                   context,
                   'Small Screen Mode',

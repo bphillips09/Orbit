@@ -223,6 +223,7 @@ class StorageData {
         case SaveDataType.playStartupSilence:
         case SaveDataType.smallScreenMode:
         case SaveDataType.safeAreaInsetScale:
+        case SaveDataType.androidImmersiveMode:
           record[key] = value;
           break;
       }
@@ -301,6 +302,7 @@ class StorageData {
         case SaveDataType.playStartupSilence:
         case SaveDataType.smallScreenMode:
         case SaveDataType.safeAreaInsetScale:
+        case SaveDataType.androidImmersiveMode:
           return record[key];
       }
     } catch (e, st) {
@@ -468,4 +470,5 @@ enum SaveDataType {
   playStartupSilence,
   smallScreenMode,
   safeAreaInsetScale,
+  androidImmersiveMode,
 }

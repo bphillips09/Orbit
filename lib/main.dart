@@ -294,6 +294,8 @@ class MainPageState extends State<MainPage>
     appState.initialize().then((_) async {
       Telemetry.event("app_started", {"first_run": !appState.welcomeSeen});
 
+      AndroidPlatformSettings.applyImmersiveMode(appState.androidImmersiveMode);
+
       final session = await AudioSession.instance;
       await session.configure(
         // Configure the AudioSession
@@ -1426,6 +1428,7 @@ class MainPageState extends State<MainPage>
     super.didChangeAppLifecycleState(state);
 
     if (state == AppLifecycleState.resumed) {
+      AndroidPlatformSettings.applyImmersiveMode(appState.androidImmersiveMode);
       if (appState.restartPending) return;
       unawaited(_autoRetryConnectionOnResume());
       // Recover audio after returning to foreground (USB and native aux).

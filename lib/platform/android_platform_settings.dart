@@ -12,4 +12,18 @@ class AndroidPlatformSettings {
     if (!isAvailable) return;
     await _channel.invokeMethod<void>('playStartupSilence');
   }
+
+  /// Hide status / navigation bars when [enabled], or show them when false.
+  /// Call after prefs load and when the user toggles the setting.
+  static void applyImmersiveMode(bool enabled) {
+    if (!isAvailable) return;
+    if (enabled) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: SystemUiOverlay.values,
+      );
+    }
+  }
 }
