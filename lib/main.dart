@@ -2001,6 +2001,7 @@ class MainPageState extends State<MainPage>
         final int activePresets =
             appState.presets.where((p) => p.sid != 0).length;
         final bool bigAppBar = appState.smallScreenMode && isLandscape(context);
+        final double appBarIconSize = bigAppBar ? 44 : 32;
         return Stack(
           children: [
             Scaffold(
@@ -2014,7 +2015,7 @@ class MainPageState extends State<MainPage>
                     appState.signalQuality,
                     isAntennaConnected: appState.isAntennaConnected,
                   )),
-                  iconSize: bigAppBar ? 32 : 24,
+                  iconSize: appBarIconSize,
                   padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                   constraints: BoxConstraints(
                     minWidth: bigAppBar ? 64 : 48,
@@ -2043,7 +2044,7 @@ class MainPageState extends State<MainPage>
                         icon: Icon(
                           appState.isScanActive ? Icons.close : Icons.scanner,
                         ),
-                        iconSize: bigAppBar ? 30 : 24,
+                        iconSize: appBarIconSize,
                         padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                         constraints: BoxConstraints(
                           minWidth: bigAppBar ? 64 : 48,
@@ -2080,7 +2081,7 @@ class MainPageState extends State<MainPage>
                           ? 'Channel Update in Progress'
                           : 'Program Guide',
                       icon: const Icon(Icons.view_list),
-                      iconSize: bigAppBar ? 30 : 24,
+                      iconSize: appBarIconSize,
                       padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                       constraints: BoxConstraints(
                         minWidth: bigAppBar ? 64 : 48,
@@ -2104,7 +2105,7 @@ class MainPageState extends State<MainPage>
                               ? Icons.close
                               : Icons.shuffle,
                         ),
-                        iconSize: bigAppBar ? 30 : 24,
+                        iconSize: appBarIconSize,
                         padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                         constraints: BoxConstraints(
                           minWidth: bigAppBar ? 64 : 48,
@@ -2138,7 +2139,7 @@ class MainPageState extends State<MainPage>
                   ],
                   IconButton(
                     icon: const Icon(Icons.settings),
-                    iconSize: bigAppBar ? 30 : 24,
+                    iconSize: appBarIconSize,
                     padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                     constraints: BoxConstraints(
                       minWidth: bigAppBar ? 64 : 48,
