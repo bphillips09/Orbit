@@ -2162,14 +2162,15 @@ class MainPageState extends State<MainPage>
                         return Column(
                           children: [
                             Expanded(
-                              child: Center(
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
                                 child: ConstrainedBox(
                                   constraints: BoxConstraints(
                                       maxWidth: appState.smallScreenMode
                                           ? constraints.maxWidth
                                           : 700),
                                   child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
                                       // Channel info
                                       () {
@@ -2426,7 +2427,8 @@ class MainPageState extends State<MainPage>
                                 ),
                               ),
                             ),
-                            // Contextual actions row
+                            // Match spacing above transport (SizedBox after Scan/Guide/Mix).
+                            const SizedBox(height: 12),
                             // Preset carousel at bottom
                             SizedBox(
                               height: 140,
