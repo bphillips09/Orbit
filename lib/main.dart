@@ -1106,7 +1106,6 @@ class MainPageState extends State<MainPage>
         if (!opened) {
           throw StateError('Aux input did not become active');
         }
-        onMessage('Head Unit Audio', 'Switched to Aux input.');
         return;
       } catch (e, st) {
         // If native Aux fails, disable it and fall back to USB audio setup
@@ -1138,7 +1137,6 @@ class MainPageState extends State<MainPage>
         try {
           final opened = await HeadUnitAux.switchToAux(timeoutMs: 1500);
           if (!opened) throw StateError('Aux input did not become active');
-          onMessage('Head Unit Audio', 'Switched to Aux input.');
           return;
         } catch (e, st) {
           logger.e('Failed to switch to aux input', error: e, stackTrace: st);
