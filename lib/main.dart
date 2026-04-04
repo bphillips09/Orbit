@@ -38,9 +38,11 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:orbit/ui/unsupported_browser_app.dart';
 import 'package:orbit/ui/favorite_dialog.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
+import 'package:orbit/ui/small_screen_mode_confirm_dialog.dart';
 import 'package:orbit/ui/welcome_dialog.dart';
 import 'package:orbit/ui/connection_dialogs.dart';
 import 'package:orbit/platform/android_platform_settings.dart';
+import 'package:orbit/platform/display_heuristics.dart';
 import 'package:orbit/platform/head_unit_aux.dart';
 import 'package:orbit/ui/log_overlay.dart';
 
@@ -314,6 +316,11 @@ class MainPageState extends State<MainPage>
       logger.i('AudioSession configured success');
       _startAudioFocusMonitoring();
 
+      // Android first run on compact displays: confirm Small Screen Mode before Welcome.
+      try {
+        await _maybeShowSmallScreenAutoConfirmDialog();
+      } catch (_) {}
+
       // Show first-time welcome
       if (!appState.welcomeSeen) {
         try {
@@ -550,6 +557,23 @@ class MainPageState extends State<MainPage>
         );
       },
     );
+  }
+
+  /// Android first run ([welcomeSeen] false): ask before enabling Small Screen Mode
+  /// when the display heuristic matches compact / automotive layouts.
+  Future<void> _maybeShowSmallScreenAutoConfirmDialog() async {
+    if (kIsWeb ||
+        kIsWasm ||
+        defaultTargetPlatform != TargetPlatform.android ||
+        appState.welcomeSeen) {
+      return;
+    }
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      if (!inferCompactDisplayForSmallScreenMode()) return;
+      await SmallScreenModeConfirmDialog.show(context, appState);
+    } catch (_) {}
   }
 
   // The device startup sequence
