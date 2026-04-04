@@ -173,10 +173,7 @@ class OrbitApp extends StatelessWidget {
 
               return MediaQuery(
                 data: next,
-                child: LogOverlayHost(
-                  enabled: appState.logOverlayEnabled,
-                  child: child ?? const SizedBox.shrink(),
-                ),
+                child: child ?? const SizedBox.shrink(),
               );
             },
             home: const MainPage(),
@@ -2762,6 +2759,9 @@ class MainPageState extends State<MainPage>
                   ],
                 ),
               ),
+            Positioned.fill(
+              child: FloatingLogLayers(enabled: appState.logOverlayEnabled),
+            ),
           ],
         );
       },

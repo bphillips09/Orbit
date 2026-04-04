@@ -1,28 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:orbit/ui/log_viewer.dart';
 
-class LogOverlayHost extends StatefulWidget {
-  const LogOverlayHost({
-    super.key,
-    required this.child,
-    required this.enabled,
-  });
+class FloatingLogLayers extends StatefulWidget {
+  const FloatingLogLayers({super.key, required this.enabled});
 
-  final Widget child;
   final bool enabled;
 
   @override
-  State<LogOverlayHost> createState() => _LogOverlayHostState();
+  State<FloatingLogLayers> createState() => _FloatingLogLayersState();
 }
 
-class _LogOverlayHostState extends State<LogOverlayHost> {
+class _FloatingLogLayersState extends State<FloatingLogLayers> {
   bool _panelVisible = false;
 
   Offset _offset = const Offset(24, 90);
   Size _size = const Size(560, 320);
 
   @override
-  void didUpdateWidget(covariant LogOverlayHost oldWidget) {
+  void didUpdateWidget(covariant FloatingLogLayers oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!widget.enabled && _panelVisible) {
       _panelVisible = false;
@@ -56,75 +51,63 @@ class _LogOverlayHostState extends State<LogOverlayHost> {
 
   @override
   Widget build(BuildContext context) {
-    final mq = MediaQuery.of(context);
-    final screen = mq.size;
-    _size = _clampSize(_size, screen);
-    _offset = _clampOffset(_offset, _size, screen);
+    if (!widget.enabled) {
+      return const IgnorePointer(
+        ignoring: true,
+        child: SizedBox.expand(),
+      );
+    }
 
-    return Overlay(
-      initialEntries: [
-        OverlayEntry(
-          builder: (_) {
-            return Stack(
-              children: [
-                widget.child,
-                if (widget.enabled) ...[
-                  Positioned(
-                    right: 12,
-                    bottom: 12 + mq.padding.bottom,
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 150),
-                      child: _panelVisible
-                          ? const SizedBox.shrink()
-                          : FloatingActionButton.small(
-                              key: const ValueKey<String>('log_overlay_button'),
-                              tooltip: 'Show log overlay',
-                              onPressed: () {
-                                setState(() {
-                                  _panelVisible = true;
-                                });
-                              },
-                              child: const Icon(Icons.article_outlined),
-                            ),
-                    ),
-                  ),
-                  if (_panelVisible)
-                    Positioned(
-                      left: _offset.dx,
-                      top: _offset.dy,
-                      width: _size.width,
-                      height: _size.height,
-                      child: _OverlayPanel(
-                        onClose: () {
-                          setState(() {
-                            _panelVisible = false;
-                          });
-                        },
-                        onDragDelta: (delta) {
-                          setState(() {
-                            _offset =
-                                _clampOffset(_offset + delta, _size, screen);
-                          });
-                        },
-                        onResizeDelta: (delta) {
-                          setState(() {
-                            _size = _clampSize(
-                              Size(
-                                _size.width + delta.dx,
-                                _size.height + delta.dy,
-                              ),
-                              screen,
-                            );
-                            _offset = _clampOffset(_offset, _size, screen);
-                          });
-                        },
-                      ),
-                    ),
-                ],
-              ],
-            );
-          },
+    final MediaQueryData mq = MediaQuery.of(context);
+    final Size screen = mq.size;
+    final Size size = _clampSize(_size, screen);
+    final Offset offset = _clampOffset(_offset, size, screen);
+
+    return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        Positioned.fill(
+          child: IgnorePointer(
+            ignoring: true,
+            child: const SizedBox.expand(),
+          ),
         ),
+        if (!_panelVisible)
+          Positioned(
+            right: 12,
+            bottom: 12 + mq.padding.bottom,
+            child: FloatingActionButton.small(
+              key: const ValueKey<String>('log_overlay_button'),
+              tooltip: 'Show log overlay',
+              onPressed: () => setState(() => _panelVisible = true),
+              child: const Icon(Icons.article_outlined),
+            ),
+          ),
+        if (_panelVisible)
+          Positioned(
+            left: offset.dx,
+            top: offset.dy,
+            width: size.width,
+            height: size.height,
+            child: _OverlayPanel(
+              onClose: () => setState(() => _panelVisible = false),
+              onDragDelta: (Offset delta) {
+                setState(() {
+                  _offset = _clampOffset(_offset + delta, _size, screen);
+                });
+              },
+              onResizeDelta: (Offset delta) {
+                setState(() {
+                  _size = _clampSize(
+                    Size(_size.width + delta.dx, _size.height + delta.dy),
+                    screen,
+                  );
+                  _offset = _clampOffset(_offset, _size, screen);
+                });
+              },
+            ),
+          ),
       ],
     );
   }
@@ -161,7 +144,7 @@ class _OverlayPanel extends StatelessWidget {
               children: [
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onPanUpdate: (d) => onDragDelta(d.delta),
+                  onPanUpdate: (DragUpdateDetails d) => onDragDelta(d.delta),
                   child: Container(
                     height: 44,
                     padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -193,7 +176,7 @@ class _OverlayPanel extends StatelessWidget {
               bottom: 2,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onPanUpdate: (d) => onResizeDelta(d.delta),
+                onPanUpdate: (DragUpdateDetails d) => onResizeDelta(d.delta),
                 child: Padding(
                   padding: const EdgeInsets.all(6),
                   child: Icon(

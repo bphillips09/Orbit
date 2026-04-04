@@ -25,6 +25,7 @@ import 'package:orbit/storage/storage_data.dart';
 import 'package:orbit/ui/presets_editor.dart';
 import 'package:orbit/ui/favorites_manager.dart';
 import 'package:orbit/ui/log_viewer.dart';
+import 'package:orbit/ui/log_level_picker.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/signal_bar.dart';
 import 'package:orbit/ui/streaming_beta.dart';
@@ -34,7 +35,6 @@ import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/logging.dart';
-import 'package:logger/logger.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_io/io.dart';
@@ -679,9 +679,9 @@ class SettingsPage extends StatelessWidget {
                     _buildSettingTile(
                       context,
                       'Log Level',
-                      _logLevelLabel(appState.logLevel),
+                      logLevelDisplayName(appState.logLevel),
                       Icons.report,
-                      onTap: () => _showLogLevelDialog(context),
+                      onTap: () => showLogLevelPickerDialog(context),
                     ),
                     _buildSwitchTile(
                       context,
@@ -1054,89 +1054,6 @@ class SettingsPage extends StatelessWidget {
         dsi,
       ),
     );
-  }
-
-  String _logLevelLabel(Level level) {
-    switch (level) {
-      case Level.trace:
-        return 'Trace';
-      case Level.debug:
-        return 'Debug';
-      case Level.info:
-        return 'Info';
-      case Level.warning:
-        return 'Warning';
-      case Level.error:
-        return 'Error';
-      case Level.fatal:
-        return 'Fatal';
-      case Level.off:
-        return 'Off';
-      default:
-        return level.name;
-    }
-  }
-
-  Future<void> _showLogLevelDialog(BuildContext context) async {
-    final appState = Provider.of<AppState>(context, listen: false);
-    final theme = Theme.of(context);
-    final levels = <Level>[
-      Level.trace,
-      Level.debug,
-      Level.info,
-      Level.warning,
-      Level.error,
-      Level.fatal,
-      Level.off,
-    ];
-
-    final selected = await showDialog<Level>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Select Log Level'),
-          content: SizedBox(
-            width: 360,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: levels.length,
-              itemBuilder: (context, index) {
-                final level = levels[index];
-                final isSelected = appState.logLevel == level;
-                return ListTile(
-                  leading: Icon(
-                    isSelected
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
-                    color: isSelected
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurface,
-                  ),
-                  title: Text(_logLevelLabel(level)),
-                  onTap: () => Navigator.pop(context, level),
-                );
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (selected != null) {
-      appState.updateLogLevel(selected);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Log level set to ${_logLevelLabel(selected)}')),
-        );
-      }
-    }
   }
 
   Widget _buildSection(

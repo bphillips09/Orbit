@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:orbit/logging.dart';
+import 'package:orbit/ui/log_level_picker.dart';
 import 'package:universal_io/io.dart';
 
 class LogViewerPage extends StatelessWidget {
@@ -253,6 +254,7 @@ class _LogViewerState extends State<LogViewer> {
                   _maybeFollow();
                 },
               ),
+              LogLevelPopupMenuButton(dense: isCompact),
               if (!isCompact)
                 IconButton(
                   tooltip: 'Reload from file tail',
