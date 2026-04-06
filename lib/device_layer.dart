@@ -100,6 +100,7 @@ class DeviceLayer {
       emitSxiIndication: _emitTranslatedSxiIndication,
       markRx: _markRx,
       startHeartbeatMonitor: _startHeartbeatMonitor,
+      stopHeartbeatMonitor: _stopHeartbeatMonitor,
       updateConnectionDetail: _updateConnectionDetail,
       reportError: onError,
       updateRadioId: (List<int> radioId) =>
@@ -436,8 +437,8 @@ class DeviceLayer {
       if (_lastValidMessage == null ||
           DateTime.now().difference(_lastValidMessage!) >
               heartbeatStaleThreshold) {
+        _stopHeartbeatMonitor();
         _serialHelper.closePort();
-        timer.cancel();
         logger.w('No heartbeat received in the last 10 seconds');
         onError?.call('Error communicating with the device.', true);
       }
@@ -570,6 +571,9 @@ class DeviceLayer {
 
   // Close the device layer
   Future<void> close() async {
+    _stopHeartbeatMonitor();
+    _networkInitRetryTimer?.cancel();
+    _networkInitRetryTimer = null;
     _buffer = Uint8List(0);
     _xmAdapter.reset();
     _activeProtocol = DeviceProtocol.sxi;

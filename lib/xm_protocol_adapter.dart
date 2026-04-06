@@ -152,6 +152,7 @@ class XmProtocolAdapter {
     required this.emitSxiIndication,
     required this.markRx,
     required this.startHeartbeatMonitor,
+    required this.stopHeartbeatMonitor,
     required this.updateConnectionDetail,
     required this.reportError,
     required this.updateRadioId,
@@ -174,6 +175,7 @@ class XmProtocolAdapter {
   final void Function(SXiPayload payload) emitSxiIndication;
   final void Function() markRx;
   final void Function() startHeartbeatMonitor;
+  final void Function() stopHeartbeatMonitor;
   final void Function(String details, {String title}) updateConnectionDetail;
   final void Function(String details, bool fatal)? reportError;
   final void Function(List<int> radioId)? updateRadioId;
@@ -247,6 +249,7 @@ class XmProtocolAdapter {
       serialHelper.readData(dataHandler, (error, expectedClosure) {
         if (!expectedClosure) {
           logger.e('XM RX stream error: $error');
+          stopHeartbeatMonitor();
           reportError?.call(error.toString(), true);
         }
       });
