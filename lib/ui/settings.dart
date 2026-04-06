@@ -39,7 +39,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_io/io.dart';
 
-enum _AndroidConfigLocation { configExportFolder, pickLocation }
+enum _ConfigDataKind { saveData, imageData }
 
 class SettingsPage extends StatelessWidget {
   final MainPageState mainPage;
@@ -621,17 +621,31 @@ class SettingsPage extends StatelessWidget {
                 ),
                 _buildSettingTile(
                   context,
-                  'Export Config',
-                  'Export current configuration',
+                  'Export Save Data',
+                  'Export favorites, presets, and settings',
                   Icons.archive,
-                  onTap: () => _exportConfigZip(context, appState),
+                  onTap: () => _exportSaveData(context, appState),
                 ),
                 _buildSettingTile(
                   context,
-                  'Import Config',
-                  'Import new configuration',
+                  'Import Save Data',
+                  'Import favorites, presets, and settings',
                   Icons.unarchive,
-                  onTap: () => _importConfigZip(context, appState),
+                  onTap: () => _importSaveData(context, appState),
+                ),
+                _buildSettingTile(
+                  context,
+                  'Export Image Data',
+                  'Export channel images',
+                  Icons.image_outlined,
+                  onTap: () => _exportImageData(context, appState),
+                ),
+                _buildSettingTile(
+                  context,
+                  'Import Image Data',
+                  'Import channel images',
+                  Icons.collections_outlined,
+                  onTap: () => _importImageData(context, appState),
                 ),
                 if (!kIsWeb && !kIsWasm)
                   _buildSettingTile(
@@ -2255,83 +2269,111 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
-  Future<void> _exportConfigZip(BuildContext context, AppState appState) async {
+  Future<void> _exportSaveData(BuildContext context, AppState appState) async {
+    await _exportSnapshotFile(
+      context,
+      appState,
+      kind: _ConfigDataKind.saveData,
+    );
+  }
+
+  Future<void> _exportImageData(BuildContext context, AppState appState) async {
+    await _exportSnapshotFile(
+      context,
+      appState,
+      kind: _ConfigDataKind.imageData,
+    );
+  }
+
+  Future<void> _importSaveData(BuildContext context, AppState appState) async {
+    await _importSnapshotFile(
+      context,
+      appState,
+      kind: _ConfigDataKind.saveData,
+    );
+  }
+
+  Future<void> _importImageData(BuildContext context, AppState appState) async {
+    await _importSnapshotFile(
+      context,
+      appState,
+      kind: _ConfigDataKind.imageData,
+    );
+  }
+
+  Future<void> _exportSnapshotFile(
+    BuildContext context,
+    AppState appState, {
+    required _ConfigDataKind kind,
+  }) async {
     try {
       final now = DateTime.now()
           .toIso8601String()
           .replaceAll(':', '-')
           .replaceAll('.', '-');
-      final filename = 'orbit-config-$now.zip';
+      final String baseFileName = switch (kind) {
+        _ConfigDataKind.saveData => OrbitConfigTransfer.saveDataExportFileName,
+        _ConfigDataKind.imageData =>
+          OrbitConfigTransfer.imageDataExportFileName,
+      };
+      final String datedFileName = baseFileName.replaceFirst(
+        '.orbit',
+        '-$now.orbit',
+      );
+      final String exportLabel = switch (kind) {
+        _ConfigDataKind.saveData => 'save data',
+        _ConfigDataKind.imageData => 'image data',
+      };
 
-      final Uint8List zipBytes = await _runWithBlockingProgress(
+      final Uint8List bytes = await _runWithBlockingProgress(
         context,
-        () => OrbitConfigTransfer.buildZipBytes(
-            storageData: appState.storageData),
-        message: 'Building config zip...',
+        () {
+          if (kind == _ConfigDataKind.saveData) {
+            return OrbitConfigTransfer.buildSaveDataBytes(
+              storageData: appState.storageData,
+            );
+          }
+          return OrbitConfigTransfer.buildImageDataBytes(
+            storageData: appState.storageData,
+          );
+        },
+        message: 'Building $exportLabel export...',
       );
 
       if (kIsWeb || kIsWasm) {
-        downloadBytes(zipBytes,
-            filename: filename, mimeType: 'application/zip');
+        downloadBytes(
+          bytes,
+          filename: datedFileName,
+          mimeType: 'application/octet-stream',
+        );
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Downloading config zip...')),
-        );
-        return;
-      }
-
-      if (Platform.isAndroid) {
-        if (!context.mounted) return;
-        final target = await _showAndroidConfigLocationDialog(
-          context,
-          action: 'export',
-        );
-        if (target == null) return;
-
-        if (target == _AndroidConfigLocation.configExportFolder) {
-          final exportDir = await _getAndroidConfigExportDirectory();
-          final outPath = '${exportDir.path}/$filename';
-          await File(outPath).writeAsBytes(zipBytes, flush: true);
-          await _openAndroidDirectoryInFileManager(exportDir);
-          if (!context.mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Exported config to $outPath')),
-          );
-          return;
-        }
-
-        final savePath = await FilePicker.platform.saveFile(
-          dialogTitle: 'Export Orbit Config',
-          fileName: filename,
-          type: FileType.custom,
-          allowedExtensions: const ['zip'],
-          bytes: zipBytes,
-        );
-        if (savePath == null || savePath.trim().isEmpty) return;
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Exported config to $savePath')),
+          SnackBar(content: Text('Downloading $exportLabel...')),
         );
         return;
       }
 
       final savePath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Export Orbit Config',
-        fileName: filename,
+        dialogTitle: 'Export Orbit ${_configKindLabel(kind)}',
+        fileName: datedFileName,
         type: FileType.custom,
-        allowedExtensions: const ['zip'],
+        allowedExtensions: const ['orbit'],
+        bytes: bytes,
       );
       if (savePath == null || savePath.trim().isEmpty) return;
 
       var outPath = savePath;
-      if (!outPath.toLowerCase().endsWith('.zip')) {
-        outPath = '$outPath.zip';
+      if (!outPath.toLowerCase().endsWith('.orbit')) {
+        outPath = '$outPath.orbit';
       }
 
-      await File(outPath).writeAsBytes(zipBytes, flush: true);
+      final outFile = File(outPath);
+      if (!await outFile.exists()) {
+        await outFile.writeAsBytes(bytes, flush: true);
+      }
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Exported config to $outPath')),
+        SnackBar(content: Text('Exported $exportLabel to $outPath')),
       );
     } catch (e) {
       if (!context.mounted) return;
@@ -2351,76 +2393,46 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
-  Future<void> _importConfigZip(BuildContext context, AppState appState) async {
+  Future<void> _importSnapshotFile(
+    BuildContext context,
+    AppState appState, {
+    required _ConfigDataKind kind,
+  }) async {
     try {
-      Uint8List? zipBytes;
-      if (Platform.isAndroid) {
-        final target = await _showAndroidConfigLocationDialog(
-          context,
-          action: 'import',
-        );
-        if (target == null) return;
+      final result = await FilePicker.platform.pickFiles(
+        dialogTitle: 'Import Orbit ${_configKindLabel(kind)}',
+        type: FileType.custom,
+        allowedExtensions: const ['orbit'],
+        withData: kIsWeb || kIsWasm || Platform.isAndroid,
+      );
+      if (result == null || result.files.isEmpty) return;
 
-        if (target == _AndroidConfigLocation.configExportFolder) {
-          final exportDir = await _getAndroidConfigExportDirectory();
-          await _openAndroidDirectoryInFileManager(exportDir);
-          if (!context.mounted) return;
-          zipBytes = await _pickAndroidConfigZipFromDirectory(
-            context,
-            exportDir,
-          );
-          if (zipBytes == null) return;
-        } else {
-          final result = await FilePicker.platform.pickFiles(
-            dialogTitle: 'Import Orbit Config Zip',
-            type: FileType.custom,
-            allowedExtensions: const ['zip'],
-            withData: true,
-          );
-          if (result == null || result.files.isEmpty) return;
-
-          final picked = result.files.single;
-          zipBytes = picked.bytes;
-          if (zipBytes == null) {
-            final path = picked.path;
-            if (path == null || path.trim().isEmpty) {
-              throw StateError('Selected file bytes are unavailable.');
-            }
-            zipBytes = await File(path).readAsBytes();
-          }
+      final picked = result.files.single;
+      Uint8List? bytes = picked.bytes;
+      if (bytes == null) {
+        final path = picked.path;
+        if (path == null || path.trim().isEmpty) {
+          throw StateError('Selected file could not be read.');
         }
-      } else {
-        final result = await FilePicker.platform.pickFiles(
-          dialogTitle: 'Import Orbit Config Zip',
-          type: FileType.custom,
-          allowedExtensions: const ['zip'],
-          withData: kIsWeb || kIsWasm,
-        );
-        if (result == null || result.files.isEmpty) return;
-
-        final picked = result.files.single;
-        if (kIsWeb || kIsWasm) {
-          zipBytes = picked.bytes;
-        } else {
-          final path = picked.path;
-          if (path == null || path.trim().isEmpty) {
-            throw StateError('Selected file path is unavailable.');
-          }
-          zipBytes = await File(path).readAsBytes();
-        }
+        bytes = await File(path).readAsBytes();
       }
 
-      if (zipBytes == null || zipBytes.isEmpty) {
-        throw StateError('Failed to read zip bytes.');
+      if (bytes.isEmpty) {
+        throw StateError('Failed to read file bytes.');
       }
+
+      final String importLabel = switch (kind) {
+        _ConfigDataKind.saveData => 'save data',
+        _ConfigDataKind.imageData => 'image data',
+      };
 
       if (!context.mounted) return;
       final proceed = (await showDialog<bool>(
             context: context,
             builder: (context) => AlertDialog(
-              title: const Text('Import config?'),
-              content: const Text(
-                'This will overwrite the selected parts of your Orbit config.',
+              title: Text('Import ${_configKindLabel(kind)}?'),
+              content: Text(
+                'This will overwrite your current $importLabel.',
               ),
               actions: <Widget>[
                 TextButton(
@@ -2443,12 +2455,19 @@ class SettingsPage extends StatelessWidget {
       await _runWithBlockingProgress(
         context,
         () async {
-          await OrbitConfigTransfer.importFromZipBytes(
-            zipBytes: zipBytes!,
+          if (kind == _ConfigDataKind.saveData) {
+            await OrbitConfigTransfer.importSaveDataBytes(
+              bytes: bytes!,
+              storageData: appState.storageData,
+            );
+            return;
+          }
+          await OrbitConfigTransfer.importImageDataBytes(
+            bytes: bytes!,
             storageData: appState.storageData,
           );
         },
-        message: 'Importing config...',
+        message: 'Importing $importLabel...',
       );
 
       if (!context.mounted) return;
@@ -2457,8 +2476,8 @@ class SettingsPage extends StatelessWidget {
         barrierDismissible: false,
         builder: (context) => AlertDialog(
           title: const Text('Restart required'),
-          content: const Text(
-            'Please restart Orbit to load the new configuration.',
+          content: Text(
+            'Please restart Orbit to load the new $importLabel.',
           ),
           actions: <Widget>[
             TextButton(
@@ -2492,142 +2511,11 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
-  Future<_AndroidConfigLocation?> _showAndroidConfigLocationDialog(
-    BuildContext context, {
-    required String action,
-  }) async {
-    if (!context.mounted) return null;
-    return showDialog<_AndroidConfigLocation>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-            '${action[0].toUpperCase()}${action.substring(1)} config: choose location'),
-        content: const Text('Select where to read/write config zip files.'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context)
-                .pop(_AndroidConfigLocation.configExportFolder),
-            child: const Text('App config export folder'),
-          ),
-          TextButton(
-            onPressed: () =>
-                Navigator.of(context).pop(_AndroidConfigLocation.pickLocation),
-            child: const Text('Pick location'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<Directory> _getAndroidConfigExportDirectory() async {
-    final externalDir = await getExternalStorageDirectory();
-    if (externalDir != null) {
-      final configDir = Directory('${externalDir.path}/config_export');
-      if (!await configDir.exists()) {
-        await configDir.create(recursive: true);
-      }
-      return configDir;
-    }
-
-    final appDir = await getApplicationSupportDirectory();
-    final fallback = Directory('${appDir.path}/config_export');
-    if (!await fallback.exists()) {
-      await fallback.create(recursive: true);
-    }
-    return fallback;
-  }
-
-  Future<void> _openAndroidDirectoryInFileManager(Directory directory) async {
-    if (!Platform.isAndroid) return;
-    try {
-      final result = await OpenFile.open(directory.path);
-      if (result.type == ResultType.done) {
-        return;
-      }
-    } catch (_) {}
-
-    try {
-      final intent = AndroidIntent(
-        action: 'android.intent.action.OPEN_DOCUMENT_TREE',
-        flags: <int>[0x10000000], // FLAG_ACTIVITY_NEW_TASK
-      );
-      await intent.launch();
-    } catch (_) {}
-  }
-
-  Future<Uint8List?> _pickAndroidConfigZipFromDirectory(
-    BuildContext context,
-    Directory directory,
-  ) async {
-    final entities = await directory.list().toList();
-    final files = <File>[];
-    for (final entity in entities) {
-      if (entity is File && entity.path.toLowerCase().endsWith('.zip')) {
-        files.add(entity);
-      }
-    }
-
-    if (files.isEmpty) {
-      if (!context.mounted) return null;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('No config zips found'),
-          content: Text('No config zip files found in ${directory.path}.'),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return null;
-    }
-
-    final entries = await Future.wait(files.map((file) async {
-      final stat = await file.stat();
-      return MapEntry<File, DateTime>(file, stat.modified);
-    }));
-    entries.sort((a, b) => b.value.compareTo(a.value));
-
-    if (!context.mounted) return null;
-    final selected = await showDialog<File>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select config zip'),
-        content: SizedBox(
-          width: 500,
-          child: ListView(
-            shrinkWrap: true,
-            children: entries.map((entry) {
-              final file = entry.key;
-              final modified = entry.value.toLocal().toString();
-              final name = file.uri.pathSegments.last;
-              return ListTile(
-                dense: true,
-                title: Text(name),
-                subtitle: Text(modified),
-                onTap: () => Navigator.of(context).pop(file),
-              );
-            }).toList(),
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-
-    if (selected == null) return null;
-    return selected.readAsBytes();
+  String _configKindLabel(_ConfigDataKind kind) {
+    return switch (kind) {
+      _ConfigDataKind.saveData => 'Save Data',
+      _ConfigDataKind.imageData => 'Image Data',
+    };
   }
 
   Future<bool> _openSupportDirectory() async {

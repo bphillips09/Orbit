@@ -1,59 +1,46 @@
 // Storage Data, handles the storage of data to the database
 // Used for storing the app's settings and data
-import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:orbit/data/favorite.dart';
 import 'package:orbit/data/handlers/channel_graphics_handler.dart';
-import 'package:sembast/sembast.dart';
-import 'package:path/path.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:orbit/logging.dart';
+import 'package:orbit/storage/orbit_database.dart';
 import 'package:orbit/storage/sembast_factory.dart';
 import 'package:orbit/ui/preset.dart';
-import 'package:orbit/logging.dart';
-import 'package:orbit/data/favorite.dart';
+import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:sembast/sembast.dart';
+import 'package:universal_io/io.dart';
 
 class StorageData {
-  late Database _mainDb;
-  late Database _imageDb;
-  bool _initialized = false;
+  static const String _legacyMainDbName = 'orbit.db';
+  static const String _legacyImageDbName = 'orbit_data.db';
+  static const String _driftMigrationMarkerKey = '__drift_migration_v1';
 
-  final _saveDataStore = stringMapStoreFactory.store('save_data');
-  final _graphicsReferenceStore =
-      intMapStoreFactory.store('graphics_reference');
-  final _graphicsInfoStore = stringMapStoreFactory.store('graphics_info');
+  late OrbitDatabase _db;
+  bool _initialized = false;
 
   Map<int, ServiceGraphicsReference> serviceGraphicsReferenceMap = {};
   Map<String, ChannelLogoInfo> imageMap = {};
 
   Future<void> init() async {
-    if (kIsWeb || kIsWasm) {
-      _mainDb = await databaseFactoryPlatform.openDatabase('orbit.db');
-    } else {
-      final appDir = await getApplicationSupportDirectory();
-      final mainDbPath = join(appDir.path, 'orbit.db');
-      _mainDb = await databaseFactoryPlatform.openDatabase(mainDbPath);
-    }
-
-    if (kIsWeb || kIsWasm) {
-      _imageDb = await databaseFactoryPlatform.openDatabase('orbit_data.db');
-    } else {
-      final appDir = await getApplicationSupportDirectory();
-      final imageDbPath = join(appDir.path, 'orbit_data.db');
-      _imageDb = await databaseFactoryPlatform.openDatabase(imageDbPath);
-    }
-
+    logger.d('StorageData init started');
+    _db = OrbitDatabase();
+    await _checkForSembastMigration();
     serviceGraphicsReferenceMap = await getGraphicsListFromStorage();
     imageMap = await getImageListFromStorage();
     _initialized = true;
+    logger.d(
+      'StorageData init complete (graphicsRefs: ${serviceGraphicsReferenceMap.length}, images: ${imageMap.length})',
+    );
   }
 
   Future<void> close() async {
     if (!_initialized) return;
     try {
-      await _mainDb.close();
-    } catch (_) {}
-    try {
-      await _imageDb.close();
+      await _db.close();
     } catch (_) {}
     _initialized = false;
   }
@@ -61,97 +48,155 @@ class StorageData {
   Future<Map<String, dynamic>> exportMainDbSnapshot({
     required int formatVersion,
   }) async {
-    return _exportDbSnapshot(
-      _mainDb,
-      formatVersion: formatVersion,
-      storeNames: const ['save_data'],
-    );
+    logger.t('Exporting main storage snapshot');
+    final rows = await _db.getAllSaveDataEntries();
+    final records = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      if (row.key.startsWith('__')) {
+        continue;
+      }
+      records.add(<String, dynamic>{
+        'key': row.key,
+        'value': _decodeJsonValue(row.valueJson),
+      });
+    }
+
+    final snapshot = <String, dynamic>{
+      'formatVersion': formatVersion,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'stores': <String, dynamic>{
+        'save_data': records,
+      },
+    };
+    logger.d('Exported main storage snapshot (records: ${records.length})');
+    return snapshot;
   }
 
   Future<Map<String, dynamic>> exportImageDbSnapshot({
     required int formatVersion,
   }) async {
-    return _exportDbSnapshot(
-      _imageDb,
-      formatVersion: formatVersion,
-      storeNames: const ['graphics_reference', 'graphics_info'],
+    logger.t('Exporting image storage snapshot');
+    final references = await _db.getGraphicsReferences();
+    final infos = await _db.getGraphicsInfos();
+
+    final snapshot = <String, dynamic>{
+      'formatVersion': formatVersion,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'stores': <String, dynamic>{
+        'graphics_reference': references
+            .map((row) => <String, dynamic>{
+                  'key': row.sid,
+                  'value': <String, dynamic>{
+                    'sid': row.sid,
+                    'referenceId': row.referenceId,
+                    'sequence': row.sequence,
+                  },
+                })
+            .toList(),
+        'graphics_info': infos
+            .map((row) => <String, dynamic>{
+                  'key': row.key,
+                  'value': <String, dynamic>{
+                    'referenceId': row.referenceId,
+                    'sequence': row.sequence,
+                    'imageData': row.imageData.toList(),
+                  },
+                })
+            .toList(),
+      },
+    };
+    logger.d(
+      'Exported image storage snapshot (references: ${references.length}, images: ${infos.length})',
     );
+    return snapshot;
   }
 
   Future<void> importMainDbSnapshot(Map<String, dynamic> snapshot) async {
-    await _importDbSnapshot(
-      _mainDb,
-      snapshot,
-      storeNames: const ['save_data'],
-    );
-  }
-
-  Future<void> importImageDbSnapshot(Map<String, dynamic> snapshot) async {
-    await _importDbSnapshot(
-      _imageDb,
-      snapshot,
-      storeNames: const ['graphics_reference', 'graphics_info'],
-    );
-
-    serviceGraphicsReferenceMap = await getGraphicsListFromStorage();
-    imageMap = await getImageListFromStorage();
-  }
-
-  Future<Map<String, dynamic>> _exportDbSnapshot(
-    Database db, {
-    required int formatVersion,
-    required List<String> storeNames,
-  }) async {
-    final storesOut = <String, dynamic>{};
-
-    for (final storeName in storeNames) {
-      final store = StoreRef<dynamic, dynamic>(storeName);
-      final records = await store.find(db);
-      storesOut[storeName] = records
-          .map((r) => <String, dynamic>{
-                'key': r.key,
-                'value': r.value,
-              })
-          .toList();
-    }
-
-    return <String, dynamic>{
-      'formatVersion': formatVersion,
-      'exportedAt': DateTime.now().toIso8601String(),
-      'stores': storesOut,
-    };
-  }
-
-  Future<void> _importDbSnapshot(
-    Database db,
-    Map<String, dynamic> snapshot, {
-    required List<String> storeNames,
-  }) async {
     final storesRaw = snapshot['stores'];
     if (storesRaw is! Map) {
       throw StateError('Snapshot is missing "stores" map');
     }
+
     final stores = Map<String, dynamic>.from(storesRaw);
+    final recordsRaw = stores['save_data'];
+    final records = recordsRaw is List ? recordsRaw : const <dynamic>[];
+    logger.d('Importing main storage snapshot (records: ${records.length})');
 
-    await db.transaction((txn) async {
-      for (final storeName in storeNames) {
-        final store = StoreRef<dynamic, dynamic>(storeName);
-        await store.delete(txn);
-
-        final recordsRaw = stores[storeName];
-        if (recordsRaw is! List) {
-          continue;
-        }
-
-        for (final record in recordsRaw) {
-          if (record is! Map) continue;
-          final map = Map<String, dynamic>.from(record);
-          final key = map['key'];
-          final value = map['value'];
-          await store.record(key).put(txn, value);
-        }
+    await _db.runInTransaction(() async {
+      await _db.clearSaveDataEntries();
+      for (final record in records) {
+        if (record is! Map) continue;
+        final map = Map<String, dynamic>.from(record);
+        final dynamic keyRaw = map['key'];
+        if (keyRaw is! String || keyRaw.isEmpty) continue;
+        await _putSaveDataRecord(keyRaw, map['value']);
       }
     });
+
+    await _setMigrationMarker();
+    logger.d('Imported main storage snapshot');
+  }
+
+  Future<void> importImageDbSnapshot(Map<String, dynamic> snapshot) async {
+    final storesRaw = snapshot['stores'];
+    if (storesRaw is! Map) {
+      throw StateError('Snapshot is missing "stores" map');
+    }
+
+    final stores = Map<String, dynamic>.from(storesRaw);
+    final referencesRaw = stores['graphics_reference'];
+    final infosRaw = stores['graphics_info'];
+    final references =
+        referencesRaw is List ? referencesRaw : const <dynamic>[];
+    final infos = infosRaw is List ? infosRaw : const <dynamic>[];
+    logger.d(
+      'Importing image storage snapshot (references: ${references.length}, images: ${infos.length})',
+    );
+
+    await _db.runInTransaction(() async {
+      await _db.clearGraphicsReferences();
+      await _db.clearGraphicsInfos();
+
+      for (final record in references) {
+        if (record is! Map) continue;
+        final map = Map<String, dynamic>.from(record);
+        final dynamic valueRaw = map['value'];
+        if (valueRaw is! Map) continue;
+        final value = Map<String, dynamic>.from(valueRaw);
+        final sid = _asInt(value['sid']);
+        final referenceId = _asInt(value['referenceId']);
+        final sequence = _asInt(value['sequence']);
+        if (sid == null || referenceId == null || sequence == null) continue;
+        await _db.upsertGraphicsReference(sid, referenceId, sequence);
+      }
+
+      for (final record in infos) {
+        if (record is! Map) continue;
+        final map = Map<String, dynamic>.from(record);
+        final dynamic keyRaw = map['key'];
+        final dynamic valueRaw = map['value'];
+        if (keyRaw is! String || valueRaw is! Map) continue;
+        final value = Map<String, dynamic>.from(valueRaw);
+        final referenceId = _asInt(value['referenceId']);
+        final sequence = _asInt(value['sequence']);
+        final imageData = _asByteList(value['imageData']);
+        if (referenceId == null || sequence == null || imageData == null) {
+          continue;
+        }
+        await _db.upsertGraphicsInfo(
+          keyRaw,
+          referenceId,
+          sequence,
+          Uint8List.fromList(imageData),
+        );
+      }
+    });
+
+    serviceGraphicsReferenceMap = await getGraphicsListFromStorage();
+    imageMap = await getImageListFromStorage();
+    logger.d(
+      'Imported image storage snapshot (graphicsRefs: ${serviceGraphicsReferenceMap.length}, images: ${imageMap.length})',
+    );
   }
 
   Future<void> save(SaveDataType saveDataType, dynamic value) async {
@@ -159,7 +204,7 @@ class StorageData {
       logger.t('Saving $saveDataType: $value');
 
       final key = saveDataType.name;
-      final Map<String, dynamic> record = {};
+      final record = <String, dynamic>{};
 
       switch (saveDataType) {
         case SaveDataType.eq:
@@ -227,28 +272,31 @@ class StorageData {
           break;
       }
 
-      await _saveDataStore.record(key).put(_mainDb, record);
+      await _putSaveDataRecord(key, record);
     } catch (e, st) {
-      logger.w('Storage save failed for $saveDataType: $e',
-          error: e, stackTrace: st);
+      logger.w(
+        'Storage save failed for $saveDataType: $e',
+        error: e,
+        stackTrace: st,
+      );
     }
   }
 
-  Future<dynamic> load(SaveDataType saveDataType,
-      {dynamic defaultValue}) async {
+  Future<dynamic> load(
+    SaveDataType saveDataType, {
+    dynamic defaultValue,
+  }) async {
     try {
       logger.t('Loading $saveDataType');
       final key = saveDataType.name;
-      final record = await _saveDataStore.record(key).get(_mainDb)
-          as Map<String, dynamic>?;
+      final record = await _getSaveDataRecord(key);
       if (record == null) return defaultValue;
 
       switch (saveDataType) {
         case SaveDataType.eq:
           return Int8List.fromList(List<int>.from(record[key]));
         case SaveDataType.presets:
-          var presetData = record.values;
-
+          final presetData = record.values;
           return presetData
               .map((data) => Preset(
                     sid: data['sid'] as int,
@@ -304,8 +352,11 @@ class StorageData {
           return record[key];
       }
     } catch (e, st) {
-      logger.w('Storage load failed for $saveDataType: $e',
-          error: e, stackTrace: st);
+      logger.w(
+        'Storage load failed for $saveDataType: $e',
+        error: e,
+        stackTrace: st,
+      );
       return defaultValue;
     }
   }
@@ -315,44 +366,39 @@ class StorageData {
     final key = '${imageGraphic.chanLogoId}-${imageGraphic.seqNum}';
     imageMap[key] = imageGraphic;
 
-    final record = <String, dynamic>{
-      'referenceId': imageGraphic.chanLogoId,
-      'sequence': imageGraphic.seqNum,
-      'imageData': imageGraphic.imageData,
-    };
-    final db = _imageDb;
-    await _graphicsInfoStore.record(key).put(db, record);
+    await _db.upsertGraphicsInfo(
+      key,
+      imageGraphic.chanLogoId,
+      imageGraphic.seqNum,
+      Uint8List.fromList(imageGraphic.imageData),
+    );
   }
 
   Future<void> saveGraphicsList(
-      List<ServiceGraphicsReference> graphicsList) async {
+    List<ServiceGraphicsReference> graphicsList,
+  ) async {
     logger.d('Saving graphics list of size: ${graphicsList.length}');
-    final db = _imageDb;
-    await db.transaction((transaction) async {
-      for (var graphicsReference in graphicsList) {
+    await _db.runInTransaction(() async {
+      for (final graphicsReference in graphicsList) {
         serviceGraphicsReferenceMap[graphicsReference.sid] = graphicsReference;
-        final record = <String, dynamic>{
-          'sid': graphicsReference.sid,
-          'referenceId': graphicsReference.referenceId,
-          'sequence': graphicsReference.sequence,
-        };
-        await _graphicsReferenceStore
-            .record(graphicsReference.sid)
-            .put(transaction, record);
+        await _db.upsertGraphicsReference(
+          graphicsReference.sid,
+          graphicsReference.referenceId,
+          graphicsReference.sequence,
+        );
       }
     });
   }
 
   Future<Map<int, ServiceGraphicsReference>>
       getGraphicsListFromStorage() async {
-    final records = await _graphicsReferenceStore.find(_imageDb);
-    final Map<int, ServiceGraphicsReference> map = {};
-    for (var record in records) {
-      final data = record.value;
+    final rows = await _db.getGraphicsReferences();
+    final map = <int, ServiceGraphicsReference>{};
+    for (final row in rows) {
       final ref = ServiceGraphicsReference(
-        sid: data['sid'] as int,
-        referenceId: data['referenceId'] as int,
-        sequence: data['sequence'] as int,
+        sid: row.sid,
+        referenceId: row.referenceId,
+        sequence: row.sequence,
       );
       map[ref.sid] = ref;
     }
@@ -360,23 +406,19 @@ class StorageData {
   }
 
   Future<Map<String, ChannelLogoInfo>> getImageListFromStorage() async {
-    final records = await _graphicsInfoStore.find(_imageDb);
-    final Map<String, ChannelLogoInfo> map = {};
-    for (var record in records) {
-      final data = record.value;
-      final key = '${data['referenceId']}-${data['sequence']}';
-      final info = ChannelLogoInfo(
-        chanLogoId: data['referenceId'] as int,
-        seqNum: data['sequence'] as int,
-        imageData: List<int>.from(data['imageData'] as List),
+    final rows = await _db.getGraphicsInfos();
+    final map = <String, ChannelLogoInfo>{};
+    for (final row in rows) {
+      map[row.key] = ChannelLogoInfo(
+        chanLogoId: row.referenceId,
+        seqNum: row.sequence,
+        imageData: row.imageData.toList(),
       );
-      map[key] = info;
     }
     return map;
   }
 
   List<int> getImageForSid(int sid) {
-    // Key format: "{referenceId}-{sequence}"
     final serviceGraphicsRef = serviceGraphicsReferenceMap[sid];
     if (serviceGraphicsRef == null) return List.empty();
 
@@ -393,12 +435,14 @@ class StorageData {
 
   Future<void> deleteAll() async {
     try {
-      // Clear main app data
-      await _saveDataStore.delete(_mainDb);
-
-      // Clear image/graphics data from image DB
-      await _graphicsReferenceStore.delete(_imageDb);
-      await _graphicsInfoStore.delete(_imageDb);
+      await _db.runInTransaction(() async {
+        await _db.clearSaveDataEntries();
+        await _db.clearGraphicsReferences();
+        await _db.clearGraphicsInfos();
+      });
+      serviceGraphicsReferenceMap.clear();
+      imageMap.clear();
+      await _setMigrationMarker();
     } catch (e, st) {
       logger.w('Storage deleteAll failed: $e', error: e, stackTrace: st);
     }
@@ -406,21 +450,192 @@ class StorageData {
 
   Future<void> delete(SaveDataType saveDataType) async {
     try {
-      final key = saveDataType.name;
-      await _saveDataStore.record(key).delete(_mainDb);
+      await _db.deleteSaveDataEntry(saveDataType.name);
     } catch (e, st) {
-      logger.w('Storage delete failed for $saveDataType: $e',
-          error: e, stackTrace: st);
+      logger.w(
+        'Storage delete failed for $saveDataType: $e',
+        error: e,
+        stackTrace: st,
+      );
     }
   }
 
   Future<void> deleteImageData() async {
     try {
-      await _graphicsReferenceStore.delete(_imageDb);
-      await _graphicsInfoStore.delete(_imageDb);
+      await _db.clearGraphicsReferences();
+      await _db.clearGraphicsInfos();
+      serviceGraphicsReferenceMap.clear();
+      imageMap.clear();
     } catch (e, st) {
       logger.w('Storage deleteImageData failed: $e', error: e, stackTrace: st);
     }
+  }
+
+  Future<void> _checkForSembastMigration() async {
+    final marker = await _getSaveDataRecord(_driftMigrationMarkerKey);
+    if (marker != null) {
+      logger.d('Legacy sembast migration already completed, skipping');
+      return;
+    }
+    logger.d('Legacy sembast migration started');
+
+    Map<String, dynamic>? mainSnapshot;
+    Map<String, dynamic>? imageSnapshot;
+
+    Database? mainDb;
+    Database? imageDb;
+    try {
+      mainDb = await _openLegacyDbIfExists(_legacyMainDbName);
+      if (mainDb != null) {
+        logger.d('Legacy main DB found, exporting snapshot');
+        mainSnapshot = await _exportLegacyDbSnapshot(
+          mainDb,
+          storeNames: const <String>['save_data'],
+        );
+      }
+    } catch (e, st) {
+      logger.w(
+        'Legacy main DB migration read failed: $e',
+        error: e,
+        stackTrace: st,
+      );
+    } finally {
+      if (mainDb != null) {
+        try {
+          await mainDb.close();
+        } catch (_) {}
+      }
+    }
+
+    try {
+      imageDb = await _openLegacyDbIfExists(_legacyImageDbName);
+      if (imageDb != null) {
+        logger.d('Legacy image DB found, exporting snapshot');
+        imageSnapshot = await _exportLegacyDbSnapshot(
+          imageDb,
+          storeNames: const <String>['graphics_reference', 'graphics_info'],
+        );
+      }
+    } catch (e, st) {
+      logger.w(
+        'Legacy image DB migration read failed: $e',
+        error: e,
+        stackTrace: st,
+      );
+    } finally {
+      if (imageDb != null) {
+        try {
+          await imageDb.close();
+        } catch (_) {}
+      }
+    }
+
+    if (mainSnapshot != null) {
+      logger.d(
+        'Applying migrated main snapshot (records: ${_snapshotStoreRecordCount(mainSnapshot, 'save_data')})',
+      );
+      await importMainDbSnapshot(mainSnapshot);
+    }
+    if (imageSnapshot != null) {
+      logger.d(
+        'Applying migrated image snapshot (references: ${_snapshotStoreRecordCount(imageSnapshot, 'graphics_reference')}, images: ${_snapshotStoreRecordCount(imageSnapshot, 'graphics_info')})',
+      );
+      await importImageDbSnapshot(imageSnapshot);
+    }
+
+    await _setMigrationMarker();
+    logger.d('Legacy sembast migration completed');
+  }
+
+  Future<Database?> _openLegacyDbIfExists(String dbName) async {
+    if (kIsWeb || kIsWasm) {
+      logger.t('Opening legacy web DB: $dbName');
+      return databaseFactoryPlatform.openDatabase(dbName);
+    }
+
+    final appDir = await getApplicationSupportDirectory();
+    final dbPath = join(appDir.path, dbName);
+    final dbFile = File(dbPath);
+    if (!await dbFile.exists()) {
+      logger.t('Legacy DB not found, skipping: $dbName');
+      return null;
+    }
+    logger.t('Opening legacy DB from file: $dbPath');
+    return databaseFactoryPlatform.openDatabase(dbPath);
+  }
+
+  Future<Map<String, dynamic>> _exportLegacyDbSnapshot(
+    Database db, {
+    required List<String> storeNames,
+  }) async {
+    final storesOut = <String, dynamic>{};
+
+    for (final storeName in storeNames) {
+      final store = StoreRef<dynamic, dynamic>(storeName);
+      final records = await store.find(db);
+      storesOut[storeName] = records
+          .map((r) => <String, dynamic>{'key': r.key, 'value': r.value})
+          .toList();
+    }
+
+    return <String, dynamic>{
+      'formatVersion': 1,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'stores': storesOut,
+    };
+  }
+
+  Future<void> _putSaveDataRecord(String key, dynamic value) async {
+    await _db.upsertSaveDataEntry(key, jsonEncode(value));
+  }
+
+  Future<Map<String, dynamic>?> _getSaveDataRecord(String key) async {
+    final row = await _db.getSaveDataEntry(key);
+    if (row == null) return null;
+    final decoded = _decodeJsonValue(row.valueJson);
+    if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    return null;
+  }
+
+  Future<void> _setMigrationMarker() async {
+    await _putSaveDataRecord(
+      _driftMigrationMarkerKey,
+      <String, dynamic>{'migrated': true},
+    );
+    logger.t('Storage migration marker updated');
+  }
+
+  dynamic _decodeJsonValue(String valueJson) {
+    try {
+      return jsonDecode(valueJson);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int? _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  List<int>? _asByteList(dynamic value) {
+    if (value is Uint8List) return value.toList();
+    if (value is List<int>) return value;
+    if (value is List) {
+      return value.map((e) => _asInt(e) ?? 0).toList();
+    }
+    return null;
+  }
+
+  int _snapshotStoreRecordCount(
+      Map<String, dynamic> snapshot, String storeName) {
+    final storesRaw = snapshot['stores'];
+    if (storesRaw is! Map) return 0;
+    final stores = Map<String, dynamic>.from(storesRaw);
+    final records = stores[storeName];
+    return records is List ? records.length : 0;
   }
 }
 

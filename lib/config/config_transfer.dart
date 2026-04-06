@@ -1,135 +1,120 @@
 import 'dart:convert';
-
+import 'dart:typed_data';
 import 'package:archive/archive.dart';
-import 'package:flutter/foundation.dart';
 import 'package:orbit/storage/storage_data.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
-import 'package:universal_io/io.dart';
 
-// Import/export Orbit config as a zip
+// Import/export Orbit configuration data
 class OrbitConfigTransfer {
-  static const String mainDbName = 'orbit.db';
-  static const String imageDbName = 'orbit_data.db';
+  static const String saveDataExportFileName = 'orbit-save-data.orbit';
+  static const String imageDataExportFileName = 'orbit-image-data.orbit';
   static const int exportFormatVersion = 1;
+  static const List<int> _magic = <int>[0x4f, 0x52, 0x42, 0x54]; // ORBT
+  static const int _containerVersion = 1;
+  static const int _kindSaveData = 1;
+  static const int _kindImageData = 2;
 
-  static Future<Uint8List> buildZipBytes({
+  static Future<Uint8List> buildSaveDataBytes({
     required StorageData storageData,
   }) async {
-    // Snapshot both DBs via sembast APIs
-    final mainSnapshot = await storageData.exportMainDbSnapshot(
+    final snapshot = await storageData.exportMainDbSnapshot(
       formatVersion: exportFormatVersion,
     );
-    final imageSnapshot = await storageData.exportImageDbSnapshot(
-      formatVersion: exportFormatVersion,
-    );
-
-    final archive = Archive();
-    final mainJson = jsonEncode(mainSnapshot);
-    final imageJson = jsonEncode(imageSnapshot);
-
-    archive.addFile(ArchiveFile(
-      mainDbName,
-      mainJson.length,
-      utf8.encode(mainJson),
-    ));
-
-    archive.addFile(ArchiveFile(
-      imageDbName,
-      imageJson.length,
-      utf8.encode(imageJson),
-    ));
-
-    final zipBytes = ZipEncoder().encode(archive);
-    return Uint8List.fromList(zipBytes);
+    return _encodeSnapshot(snapshot, kind: _kindSaveData, label: 'save data');
   }
 
-  static Future<void> importFromZipBytes({
-    required Uint8List zipBytes,
+  static Future<Uint8List> buildImageDataBytes({
     required StorageData storageData,
   }) async {
-    final archive = ZipDecoder().decodeBytes(zipBytes);
-    Map<String, Map<String, dynamic>> snapshots = {};
-
-    for (final file in archive.files) {
-      if (!file.isFile) continue;
-      final name = file.name.split('/').last;
-      if (name != mainDbName && name != imageDbName) continue;
-
-      final content = file.content as List<int>;
-      final text = utf8.decode(content);
-      final decoded = jsonDecode(text);
-      if (decoded is! Map) {
-        throw StateError('Invalid snapshot format in $name');
-      }
-      snapshots[name] = Map<String, dynamic>.from(decoded);
-    }
-
-    if (snapshots.isEmpty) {
-      throw StateError(
-          'Zip does not contain $mainDbName or $imageDbName snapshots!');
-    }
-
-    // Overwrite records in-place in IndexedDB
-    if (kIsWeb || kIsWasm) {
-      if (snapshots.containsKey(mainDbName)) {
-        await storageData.importMainDbSnapshot(
-          Map<String, dynamic>.from(snapshots[mainDbName]!),
-        );
-      }
-
-      if (snapshots.containsKey(imageDbName)) {
-        await storageData.importImageDbSnapshot(
-          Map<String, dynamic>.from(snapshots[imageDbName]!),
-        );
-      }
-
-      return;
-    }
-
-    final appDir = await getApplicationSupportDirectory();
-    final mainPath = p.join(appDir.path, mainDbName);
-    final imagePath = p.join(appDir.path, imageDbName);
-
-    await storageData.close();
-
-    if (snapshots.containsKey(mainDbName)) {
-      await _backupDbFile(mainPath);
-    }
-    if (snapshots.containsKey(imageDbName)) {
-      await _backupDbFile(imagePath);
-    }
-
-    // Re-open will create any missing DB files
-    await storageData.init();
-
-    // Import whichever DB snapshots were provided
-    if (snapshots.containsKey(mainDbName)) {
-      await storageData.importMainDbSnapshot(
-        Map<String, dynamic>.from(snapshots[mainDbName]!),
-      );
-    }
-
-    if (snapshots.containsKey(imageDbName)) {
-      await storageData.importImageDbSnapshot(
-        Map<String, dynamic>.from(snapshots[imageDbName]!),
-      );
-    }
+    final snapshot = await storageData.exportImageDbSnapshot(
+      formatVersion: exportFormatVersion,
+    );
+    return _encodeSnapshot(snapshot, kind: _kindImageData, label: 'image data');
   }
 
-  static Future<void> _backupDbFile(String path) async {
-    final dbFile = File(path);
-    if (!await dbFile.exists()) return;
+  static Future<void> importSaveDataBytes({
+    required Uint8List bytes,
+    required StorageData storageData,
+  }) async {
+    final snapshot = _decodeSnapshot(
+      bytes,
+      label: 'save data',
+      expectedKind: _kindSaveData,
+    );
+    await storageData.importMainDbSnapshot(snapshot);
+  }
 
-    final backupPath = '$path.old';
-    final backupFile = File(backupPath);
-    if (await backupFile.exists()) {
-      final ts = DateTime.now()
-          .toIso8601String()
-          .replaceAll(':', '-')
-          .replaceAll('.', '-');
-      await backupFile.rename('$backupPath.$ts');
+  static Future<void> importImageDataBytes({
+    required Uint8List bytes,
+    required StorageData storageData,
+  }) async {
+    final snapshot = _decodeSnapshot(
+      bytes,
+      label: 'image data',
+      expectedKind: _kindImageData,
+    );
+    await storageData.importImageDbSnapshot(snapshot);
+  }
+
+  static Uint8List _encodeSnapshot(
+    Map<String, dynamic> snapshot, {
+    required int kind,
+    required String label,
+  }) {
+    final jsonBytes = utf8.encode(jsonEncode(snapshot));
+    final compressed = GZipEncoder().encodeBytes(jsonBytes);
+    if (compressed.isEmpty) {
+      throw StateError('Failed to encode $label payload.');
     }
-    await dbFile.rename(backupPath);
+
+    return Uint8List.fromList(
+      <int>[
+        ..._magic,
+        _containerVersion,
+        kind,
+        ...compressed,
+      ],
+    );
+  }
+
+  static Map<String, dynamic> _decodeSnapshot(
+    Uint8List bytes, {
+    required String label,
+    required int expectedKind,
+  }) {
+    if (bytes.length < 7) {
+      throw StateError('Selected $label file is empty.');
+    }
+
+    if (!_matchesMagic(bytes)) {
+      throw StateError('Invalid $label file header.');
+    }
+
+    final version = bytes[4];
+    if (version != _containerVersion) {
+      throw StateError('Unsupported $label format version: $version');
+    }
+
+    final kind = bytes[5];
+    if (kind != expectedKind) {
+      throw StateError('Selected file is not valid for $label import.');
+    }
+
+    final compressedBytes = bytes.sublist(6);
+    final jsonBytes = GZipDecoder().decodeBytes(compressedBytes);
+    final decoded = jsonDecode(utf8.decode(jsonBytes));
+    if (decoded is! Map) {
+      throw StateError('Invalid $label snapshot format.');
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  static bool _matchesMagic(Uint8List bytes) {
+    for (int i = 0; i < _magic.length; i++) {
+      if (bytes[i] != _magic[i]) {
+        return false;
+      }
+    }
+    return true;
   }
 }

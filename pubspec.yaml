@@ -24,6 +24,8 @@ dependencies:
   path_provider: ^2.1.5
   sembast: ^3.8.6
   sembast_web: ^2.4.4+1
+  drift: ^2.32.1
+  drift_flutter: ^0.3.0
   #file operations
   open_file: ^3.5.11
   android_intent_plus: ^5.3.1
@@ -72,7 +74,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  build_runner: ^2.6.0
+  build_runner: ^2.13.1
+  drift_dev: ^2.32.1
   package_rename: ^1.10.1
   flutter_launcher_icons: ^0.14.4
   peanut: ^6.0.1
