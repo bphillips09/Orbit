@@ -42,6 +42,7 @@ import 'package:orbit/ui/welcome_dialog.dart';
 import 'package:orbit/ui/connection_dialogs.dart';
 import 'package:orbit/platform/android_platform_settings.dart';
 import 'package:orbit/platform/head_unit_aux.dart';
+import 'package:orbit/platform/web_serial_support.dart';
 import 'package:orbit/ui/log_overlay.dart';
 
 // Audio service handler
@@ -68,25 +69,21 @@ void main() async {
     unawaited(Telemetry.initialize(appID, debug: kDebugMode));
 
     if (kIsWeb || kIsWasm) {
-      try {
-        final deviceInfo = DeviceInfoPlugin();
-        final webInfo = await deviceInfo.webBrowserInfo;
-        final BrowserName name = webInfo.browserName;
-        final bool isChromium = name == BrowserName.chrome ||
-            name == BrowserName.edge ||
-            name == BrowserName.opera;
+      final bool isSupportedBrowser =
+          defaultTargetPlatform != TargetPlatform.android &&
+              browserSupportsWebSerial();
 
-        if (defaultTargetPlatform == TargetPlatform.android || !isChromium) {
+      if (!isSupportedBrowser) {
+        try {
+          final deviceInfo = DeviceInfoPlugin();
+          final webInfo = await deviceInfo.webBrowserInfo;
           logger.w('Unsupported browser detected: ${webInfo.userAgent}');
           Telemetry.event(
-              "unsupported_browser", {"browser": webInfo.browserName.name});
-          runApp(const UnsupportedBrowserApp());
-          return;
+              "unsupported_browser", {"browser": webInfo.userAgent});
+        } catch (e) {
+          logger.w('Failed to detect browser info: $e');
+          Telemetry.event("unsupported_browser", {"browser": "Unknown"});
         }
-      } catch (e) {
-        logger.w('Failed to detect browser info: $e');
-        // If detection fails, show message instead of proceeding
-        Telemetry.event("unsupported_browser", {"browser": "Unknown"});
         runApp(const UnsupportedBrowserApp());
         return;
       }
