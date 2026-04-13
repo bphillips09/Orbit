@@ -38,9 +38,11 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:orbit/ui/unsupported_browser_app.dart';
 import 'package:orbit/ui/favorite_dialog.dart';
 import 'package:orbit/ui/favorites_on_air_dialog.dart';
+import 'package:orbit/ui/small_screen_mode_confirm_dialog.dart';
 import 'package:orbit/ui/welcome_dialog.dart';
 import 'package:orbit/ui/connection_dialogs.dart';
 import 'package:orbit/platform/android_platform_settings.dart';
+import 'package:orbit/platform/display_heuristics.dart';
 import 'package:orbit/platform/head_unit_aux.dart';
 import 'package:orbit/platform/web_serial_support.dart';
 import 'package:orbit/ui/log_overlay.dart';
@@ -168,10 +170,7 @@ class OrbitApp extends StatelessWidget {
 
               return MediaQuery(
                 data: next,
-                child: LogOverlayHost(
-                  enabled: appState.logOverlayEnabled,
-                  child: child ?? const SizedBox.shrink(),
-                ),
+                child: child ?? const SizedBox.shrink(),
               );
             },
             home: const MainPage(),
@@ -299,6 +298,8 @@ class MainPageState extends State<MainPage>
     _appStateInitializeFuture!.then((_) async {
       Telemetry.event("app_started", {"first_run": !appState.welcomeSeen});
 
+      AndroidPlatformSettings.applyImmersiveMode(appState.androidImmersiveMode);
+
       final session = await AudioSession.instance;
       await session.configure(
         // Configure the AudioSession
@@ -316,6 +317,11 @@ class MainPageState extends State<MainPage>
 
       logger.i('AudioSession configured success');
       _startAudioFocusMonitoring();
+
+      // Android first run on compact displays: confirm Small Screen Mode before Welcome.
+      try {
+        await _maybeShowSmallScreenAutoConfirmDialog();
+      } catch (_) {}
 
       // Show first-time welcome
       if (!appState.welcomeSeen) {
@@ -554,6 +560,23 @@ class MainPageState extends State<MainPage>
         );
       },
     );
+  }
+
+  /// Android first run ([welcomeSeen] false): ask before enabling Small Screen Mode
+  /// when the display heuristic matches compact / automotive layouts.
+  Future<void> _maybeShowSmallScreenAutoConfirmDialog() async {
+    if (kIsWeb ||
+        kIsWasm ||
+        defaultTargetPlatform != TargetPlatform.android ||
+        appState.welcomeSeen) {
+      return;
+    }
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      if (!inferCompactDisplayForSmallScreenMode()) return;
+      await SmallScreenModeConfirmDialog.show(context, appState);
+    } catch (_) {}
   }
 
   // The device startup sequence
@@ -1112,7 +1135,6 @@ class MainPageState extends State<MainPage>
         if (!opened) {
           throw StateError('Aux input did not become active');
         }
-        onMessage('Head Unit Audio', 'Switched to Aux input.');
         return;
       } catch (e, st) {
         // If native Aux fails, disable it and fall back to USB audio setup
@@ -1144,7 +1166,6 @@ class MainPageState extends State<MainPage>
         try {
           final opened = await HeadUnitAux.switchToAux(timeoutMs: 1500);
           if (!opened) throw StateError('Aux input did not become active');
-          onMessage('Head Unit Audio', 'Switched to Aux input.');
           return;
         } catch (e, st) {
           logger.e('Failed to switch to aux input', error: e, stackTrace: st);
@@ -1434,6 +1455,7 @@ class MainPageState extends State<MainPage>
     super.didChangeAppLifecycleState(state);
 
     if (state == AppLifecycleState.resumed) {
+      AndroidPlatformSettings.applyImmersiveMode(appState.androidImmersiveMode);
       if (appState.restartPending) return;
       unawaited(_autoRetryConnectionOnResume());
       // Recover audio after returning to foreground (USB and native aux).
@@ -2008,6 +2030,7 @@ class MainPageState extends State<MainPage>
         final int activePresets =
             appState.presets.where((p) => p.sid != 0).length;
         final bool bigAppBar = appState.smallScreenMode && isLandscape(context);
+        final double appBarIconSize = bigAppBar ? 44 : 32;
         return Stack(
           children: [
             Scaffold(
@@ -2021,7 +2044,7 @@ class MainPageState extends State<MainPage>
                     appState.signalQuality,
                     isAntennaConnected: appState.isAntennaConnected,
                   )),
-                  iconSize: bigAppBar ? 32 : 24,
+                  iconSize: appBarIconSize,
                   padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                   constraints: BoxConstraints(
                     minWidth: bigAppBar ? 64 : 48,
@@ -2050,7 +2073,7 @@ class MainPageState extends State<MainPage>
                         icon: Icon(
                           appState.isScanActive ? Icons.close : Icons.scanner,
                         ),
-                        iconSize: bigAppBar ? 30 : 24,
+                        iconSize: appBarIconSize,
                         padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                         constraints: BoxConstraints(
                           minWidth: bigAppBar ? 64 : 48,
@@ -2087,7 +2110,7 @@ class MainPageState extends State<MainPage>
                           ? 'Channel Update in Progress'
                           : 'Program Guide',
                       icon: const Icon(Icons.view_list),
-                      iconSize: bigAppBar ? 30 : 24,
+                      iconSize: appBarIconSize,
                       padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                       constraints: BoxConstraints(
                         minWidth: bigAppBar ? 64 : 48,
@@ -2111,7 +2134,7 @@ class MainPageState extends State<MainPage>
                               ? Icons.close
                               : Icons.shuffle,
                         ),
-                        iconSize: bigAppBar ? 30 : 24,
+                        iconSize: appBarIconSize,
                         padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                         constraints: BoxConstraints(
                           minWidth: bigAppBar ? 64 : 48,
@@ -2145,7 +2168,7 @@ class MainPageState extends State<MainPage>
                   ],
                   IconButton(
                     icon: const Icon(Icons.settings),
-                    iconSize: bigAppBar ? 30 : 24,
+                    iconSize: appBarIconSize,
                     padding: EdgeInsets.all(bigAppBar ? 14 : 8),
                     constraints: BoxConstraints(
                       minWidth: bigAppBar ? 64 : 48,
@@ -2172,14 +2195,15 @@ class MainPageState extends State<MainPage>
                         return Column(
                           children: [
                             Expanded(
-                              child: Center(
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
                                 child: ConstrainedBox(
                                   constraints: BoxConstraints(
                                       maxWidth: appState.smallScreenMode
                                           ? constraints.maxWidth
                                           : 700),
                                   child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
                                       // Channel info
                                       () {
@@ -2436,7 +2460,8 @@ class MainPageState extends State<MainPage>
                                 ),
                               ),
                             ),
-                            // Contextual actions row
+                            // Match spacing above transport (SizedBox after Scan/Guide/Mix).
+                            const SizedBox(height: 12),
                             // Preset carousel at bottom
                             SizedBox(
                               height: 140,
@@ -2744,6 +2769,9 @@ class MainPageState extends State<MainPage>
                   ],
                 ),
               ),
+            Positioned.fill(
+              child: FloatingLogLayers(enabled: appState.logOverlayEnabled),
+            ),
           ],
         );
       },

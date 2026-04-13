@@ -22,6 +22,7 @@ import 'package:orbit/data/radar_overlay.dart';
 import 'package:orbit/data/weather/tabular_weather_state.dart';
 import 'package:orbit/debug_tools_stub.dart'
     if (dart.library.io) 'package:orbit/debug_tools.dart';
+import 'package:orbit/platform/android_platform_settings.dart';
 
 class AppState extends ChangeNotifier {
   static const int favoritesPerMonitorCapacity = 60;
@@ -43,6 +44,7 @@ class AppState extends ChangeNotifier {
   bool debugMode = false;
   bool analyticsDisabled = false;
   bool smallScreenMode = false;
+  bool androidImmersiveMode = false;
   double safeAreaInsetScale = 1.0;
   // Android-only: preferred audio output route
   String androidAudioOutputRoute = 'Speaker';
@@ -424,6 +426,11 @@ class AppState extends ChangeNotifier {
       defaultValue: false,
     );
 
+    androidImmersiveMode = await storageData.load(
+      SaveDataType.androidImmersiveMode,
+      defaultValue: false,
+    );
+
     // Safe-area scale
     final dynamic rawSafeAreaScale = await storageData.load(
       SaveDataType.safeAreaInsetScale,
@@ -790,6 +797,13 @@ class AppState extends ChangeNotifier {
         };
       } catch (_) {}
     }
+    notifyListeners();
+  }
+
+  void updateAndroidImmersiveMode(bool enabled) {
+    androidImmersiveMode = enabled;
+    storageData.save(SaveDataType.androidImmersiveMode, enabled);
+    AndroidPlatformSettings.applyImmersiveMode(enabled);
     notifyListeners();
   }
 

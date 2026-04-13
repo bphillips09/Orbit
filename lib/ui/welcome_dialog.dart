@@ -33,8 +33,8 @@ class WelcomeDialog extends StatelessWidget {
           Image.asset('assets/icon/icon.png', width: 32, height: 32),
         ],
       ),
-      content: SizedBox(
-        width: 420,
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
