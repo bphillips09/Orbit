@@ -124,6 +124,10 @@ class OrbitDatabase extends _$OrbitDatabase {
 QueryExecutor _openConnection() {
   return driftDatabase(
     name: 'orbit_drift',
+    web: DriftWebOptions(
+      sqlite3Wasm: Uri.parse('sqlite3.wasm'),
+      driftWorker: Uri.parse('drift_worker.js'),
+    ),
     native: DriftNativeOptions(
       databaseDirectory: getApplicationSupportDirectory,
     ),

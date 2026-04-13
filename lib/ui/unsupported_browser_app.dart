@@ -93,7 +93,7 @@ class UnsupportedBrowserApp extends StatelessWidget {
                           textAlign: TextAlign.center),
                       const SizedBox(height: 16),
                       Text(
-                          'Orbit only supports Chromium-based browsers on Desktop platforms.',
+                          'Orbit requires a desktop browser with WebSerial support.',
                           style: TextStyle(
                             fontSize: 16,
                             color: onSurfaceColor,
@@ -139,7 +139,7 @@ class UnsupportedBrowserApp extends StatelessWidget {
                                   );
                                 },
                             ),
-                            const TextSpan(text: ', or '),
+                            const TextSpan(text: ', '),
                             TextSpan(
                               text: 'Opera',
                               style: TextStyle(
@@ -150,6 +150,22 @@ class UnsupportedBrowserApp extends StatelessWidget {
                                 ..onTap = () {
                                   launchUrl(
                                     Uri.parse('https://www.opera.com/'),
+                                    webOnlyWindowName: '_blank',
+                                  );
+                                },
+                            ),
+                            const TextSpan(text: ', or '),
+                            TextSpan(
+                              text: 'Firefox Nightly',
+                              style: TextStyle(
+                                color: linkColor,
+                                decoration: TextDecoration.underline,
+                              ),
+                              recognizer: TapGestureRecognizer()
+                                ..onTap = () {
+                                  launchUrl(
+                                    Uri.parse(
+                                        'https://www.firefox.com/en-US/download/all/desktop-nightly/'),
                                     webOnlyWindowName: '_blank',
                                   );
                                 },
