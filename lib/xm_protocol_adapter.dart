@@ -1193,7 +1193,13 @@ class XmProtocolAdapter {
 
     final int preferredChannel = currentChannelProvider().clamp(1, 255);
     _sendCommand(
-        _xmTuneCommand(target: preferredChannel, mode: XmTuneMode.channel),
+        _xmTuneCommand(
+          target: preferredChannel,
+          mode: XmTuneMode.channel,
+          dataMode: false,
+          programType: 0x00,
+          route: 0x01,
+        ),
         paced: true);
     _sendCommand(
         _xmChannelInfoCommand(
@@ -1225,11 +1231,6 @@ class XmProtocolAdapter {
       if (_channelMonitorAcked) {
         timer.cancel();
         _channelMonitorRetryTimer = null;
-        return;
-      }
-      if (_xmAppBootstrapInProgress ||
-          _weatherBootstrapTuneActive ||
-          _weatherBootstrapRetuneActive) {
         return;
       }
       _sendCommand(_xmChannelMonitorCommand(channel: target), paced: true);
