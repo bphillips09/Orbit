@@ -1,15 +1,23 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:orbit/device_layer.dart';
-import 'package:orbit/storage/storage_data.dart';
-import 'package:orbit/serial_helper/serial_helper_interface.dart';
 import 'package:orbit/logging.dart';
+import 'package:orbit/serial_helper/serial_helper_interface.dart';
+import 'package:orbit/storage/storage_data.dart';
+import 'package:orbit/xm_protocol_adapter.dart';
 
 class ConnectionDialogs {
   const ConnectionDialogs._();
   static const String defaultNetworkHost = '172.22.255.252';
   static const String defaultNetworkUartPort = '3555';
   static const String defaultNetworkGpioPort = '4556';
+  static const List<int> sxiSelectableBaudRates = <int>[
+    57600,
+    115200,
+    230400,
+    460800,
+    921600,
+  ];
 
   static Future<SerialTransport?> showConnectionType(
     BuildContext context, {
@@ -97,9 +105,10 @@ class ConnectionDialogs {
     );
   }
 
-  static Future<DeviceProtocolPreference?> showDeviceProfilePicker(
+  static Future<DeviceProfilePickResult?> showDeviceProfilePicker(
     BuildContext context, {
     DeviceProtocolPreference initialPreference = DeviceProtocolPreference.auto,
+    int initialBaud = 460800,
     bool allowXm = true,
     bool barrierDismissible = true,
   }) async {
@@ -107,13 +116,22 @@ class ConnectionDialogs {
     if (!allowXm && selected == DeviceProtocolPreference.xmOnly) {
       selected = DeviceProtocolPreference.auto;
     }
+    int selectedSxiBaud =
+        sxiSelectableBaudRates.contains(initialBaud) ? initialBaud : 460800;
+    int selectedXmBaud = XmProtocolAdapter.candidateBauds.contains(initialBaud)
+        ? initialBaud
+        : XmProtocolAdapter.candidateBauds.first;
 
-    return await showDialog<DeviceProtocolPreference>(
+    return await showDialog<DeviceProfilePickResult>(
       context: context,
       barrierDismissible: barrierDismissible,
       builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setStateDialog) {
+            final bool showSxiBaud =
+                selected == DeviceProtocolPreference.sxiOnly;
+            final bool showXmBaud =
+                allowXm && selected == DeviceProtocolPreference.xmOnly;
             return AlertDialog(
               title: const Text('Device Profile'),
               content: SizedBox(
@@ -165,6 +183,54 @@ class ConnectionDialogs {
                             }
                           : null,
                     ),
+                    if (showSxiBaud) ...[
+                      const SizedBox(height: 8),
+                      ListTile(
+                        leading: const Icon(Icons.speed),
+                        title: const Text('SXi baud rate'),
+                        trailing: DropdownButton<int>(
+                          value: selectedSxiBaud,
+                          onChanged: (int? value) {
+                            if (value == null) return;
+                            setStateDialog(() {
+                              selectedSxiBaud = value;
+                            });
+                          },
+                          items: sxiSelectableBaudRates
+                              .map(
+                                (int baud) => DropdownMenuItem<int>(
+                                  value: baud,
+                                  child: Text('$baud'),
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      ),
+                    ],
+                    if (showXmBaud) ...[
+                      const SizedBox(height: 8),
+                      ListTile(
+                        leading: const Icon(Icons.speed),
+                        title: const Text('XM baud rate'),
+                        trailing: DropdownButton<int>(
+                          value: selectedXmBaud,
+                          onChanged: (int? value) {
+                            if (value == null) return;
+                            setStateDialog(() {
+                              selectedXmBaud = value;
+                            });
+                          },
+                          items: XmProtocolAdapter.candidateBauds
+                              .map(
+                                (int baud) => DropdownMenuItem<int>(
+                                  value: baud,
+                                  child: Text('$baud'),
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -174,7 +240,15 @@ class ConnectionDialogs {
                   child: const Text('Cancel'),
                 ),
                 FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, selected),
+                  onPressed: () => Navigator.pop(
+                    dialogContext,
+                    DeviceProfilePickResult(
+                      protocol: selected,
+                      selectedBaud: selected == DeviceProtocolPreference.xmOnly
+                          ? selectedXmBaud
+                          : selectedSxiBaud,
+                    ),
+                  ),
                   child: const Text('Continue'),
                 ),
               ],
@@ -446,4 +520,14 @@ class ConnectionDialogs {
 
     return (lastPortString, lastPortObject);
   }
+}
+
+class DeviceProfilePickResult {
+  final DeviceProtocolPreference protocol;
+  final int selectedBaud;
+
+  const DeviceProfilePickResult({
+    required this.protocol,
+    required this.selectedBaud,
+  });
 }

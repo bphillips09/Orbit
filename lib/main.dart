@@ -246,6 +246,13 @@ class MainPageState extends State<MainPage>
   Future<void>? _connectionErrorDialogFuture;
   StreamSubscription<AudioInterruptionEvent>? _appInterruptionSub;
   bool _resumeAfterTransientInterruption = false;
+  Future<void>? _appStateInitializeFuture;
+
+  Future<void> _ensureAppStateInitialized() async {
+    final Future<void>? initFuture = _appStateInitializeFuture;
+    if (initFuture == null) return;
+    await initFuture;
+  }
 
   @override
   void initState() {
@@ -287,8 +294,9 @@ class MainPageState extends State<MainPage>
     );
     sxiLayer.deviceLayer = deviceLayer;
 
-    // Initialize the app state
-    appState.initialize().then((_) async {
+    // Initialize settings/cache once, and ensure connection awaits completion
+    _appStateInitializeFuture = appState.initialize();
+    _appStateInitializeFuture!.then((_) async {
       Telemetry.event("app_started", {"first_run": !appState.welcomeSeen});
 
       final session = await AudioSession.instance;
@@ -390,6 +398,7 @@ class MainPageState extends State<MainPage>
     DeviceProtocolPreference preferredProtocol = DeviceProtocolPreference.auto,
     bool persistPort = true,
   }) async {
+    await _ensureAppStateInitialized();
     _userRequestedDisconnect = false;
     // Ensure any selection dialogs are gone so the main progress overlay is visible
     try {
@@ -549,6 +558,7 @@ class MainPageState extends State<MainPage>
 
   // The device startup sequence
   Future<void> startupSequence() async {
+    await _ensureAppStateInitialized();
     if (_startupInProgress) {
       logger.w('Startup sequence already in progress');
       return;
@@ -659,6 +669,7 @@ class MainPageState extends State<MainPage>
     SerialTransport transport = SerialTransport.serial,
     DeviceProtocolPreference preferredProtocol = DeviceProtocolPreference.auto,
   }) async {
+    await _ensureAppStateInitialized();
     if (mounted) {
       setState(() {
         _isLoading = true;
@@ -1907,10 +1918,11 @@ class MainPageState extends State<MainPage>
             DeviceProtocolPreference.auto
           );
         }
-        final DeviceProtocolPreference? picked =
+        final DeviceProfilePickResult? picked =
             await ConnectionDialogs.showDeviceProfilePicker(
           context,
           initialPreference: initialPreference,
+          initialBaud: appState.secondaryBaudRate,
           allowXm: true,
           barrierDismissible: barrierDismissible,
         );
@@ -1925,7 +1937,8 @@ class MainPageState extends State<MainPage>
         if (picked == null) {
           continue;
         }
-        return (SerialTransport.serial, res.$1, res.$2, picked);
+        appState.updateSecondaryBaudRate(picked.selectedBaud);
+        return (SerialTransport.serial, res.$1, res.$2, picked.protocol);
       } else {
         return (
           SerialTransport.serial,

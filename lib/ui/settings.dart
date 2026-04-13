@@ -342,16 +342,18 @@ class SettingsPage extends StatelessWidget {
                         }
                       }
                       if (!context.mounted) return;
-                      final DeviceProtocolPreference? picked =
+                      final DeviceProfilePickResult? picked =
                           await ConnectionDialogs.showDeviceProfilePicker(
                         context,
                         initialPreference: initialPreference,
+                        initialBaud: appState.secondaryBaudRate,
                         allowXm: true,
                         barrierDismissible: true,
                       );
                       if (!context.mounted) return;
                       if (picked == null) return;
-                      preferredProtocol = picked;
+                      preferredProtocol = picked.protocol;
+                      appState.updateSecondaryBaudRate(picked.selectedBaud);
                     } else if (transport == SerialTransport.network &&
                         !kIsWeb &&
                         !kIsWasm) {
@@ -1420,8 +1422,7 @@ class SettingsPage extends StatelessWidget {
 
   Widget _buildSecondaryBaudSelector(BuildContext context, AppState appState) {
     final theme = Theme.of(context);
-    // Allowed baud rates matching device codes 0..4
-    const List<int> baudRates = [57600, 115200, 230400, 460800, 921600];
+    final List<int> baudRates = ConnectionDialogs.sxiSelectableBaudRates;
     int current = baudRates.contains(appState.secondaryBaudRate)
         ? appState.secondaryBaudRate
         : 460800;

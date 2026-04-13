@@ -24,6 +24,7 @@ enum XmMessageCode {
   radioIdReport(0xB1),
   signalStatusC1(0xC1),
   signalStatusC3(0xC3),
+  channelMonitorAck(0xCF),
   channelMonitorStatus(0xD0),
   channelNameMonitor(0xD1),
   channelCategoryMonitor(0xD2),
@@ -109,7 +110,9 @@ enum XmCommandCode {
   requestExtendedInfo(0x22),
   requestChannelInfo(0x25),
   requestRadioId(0x31),
+  dataControl(0x4A),
   ping(0x43),
+  channelMonitor(0x4F),
   signalMonitor(0x42),
   channelLabelMonitor(0x50),
   diagnosticsMonitor(0x60),
@@ -157,9 +160,24 @@ class XmProtocolAdapter {
     required this.reportError,
     required this.updateRadioId,
     required this.updateChannelData,
-  });
+    List<int>? xmStartupBaudCandidates,
+  }) : xmStartupBaudCandidates = xmStartupBaudCandidates != null
+            ? List<int>.unmodifiable(xmStartupBaudCandidates)
+            : List<int>.unmodifiable(candidateBauds);
 
   static const List<int> candidateBauds = <int>[9600, 38400, 115200];
+  // XM baud try-order from saved baud setting
+  static List<int> candidateBaudsForSavedBaud(int savedBaud) {
+    if (!candidateBauds.contains(savedBaud)) {
+      return List<int>.from(candidateBauds);
+    }
+    return <int>[
+      savedBaud,
+      ...candidateBauds.where((int b) => b != savedBaud),
+    ];
+  }
+
+  final List<int> xmStartupBaudCandidates;
 
   final SerialHelper serialHelper;
   final Object port;
@@ -189,14 +207,20 @@ class XmProtocolAdapter {
   bool _guideSweepActive = false;
   Timer? _guideSweepStartTimer;
   Timer? _guideSweepRefreshTimer;
+  Timer? _channelMonitorRetryTimer;
   Completer<bool>? _postConfigConfirmCompleter;
   DateTime? _lastGuideSweepStartedAt;
   final Set<int> _guideSweepSeenChannels = <int>{};
   int _guideSweepStepCount = 0;
   int _guideSweepNoProgressCount = 0;
   int _guideSweepStartChannel = 1;
+  bool _channelMonitorAcked = false;
+  int _xmRxBytesSinceLog = 0;
+  int _xmRxFramesSinceLog = 0;
+  DateTime _lastXmRxActivityLogAt = DateTime.fromMillisecondsSinceEpoch(0);
   static const int _guideSweepMaxSteps = 320;
   static const Duration _guideSweepRefreshInterval = Duration(minutes: 1);
+  static const Duration _xmRxActivityLogInterval = Duration(seconds: 2);
   Future<void> _txChain = Future<void>.value();
   static const Duration _defaultTxPace = Duration(milliseconds: 25);
 
@@ -210,12 +234,18 @@ class XmProtocolAdapter {
     _guideSweepStartTimer = null;
     _guideSweepRefreshTimer?.cancel();
     _guideSweepRefreshTimer = null;
+    _channelMonitorRetryTimer?.cancel();
+    _channelMonitorRetryTimer = null;
     _lastGuideSweepStartedAt = null;
     _postConfigConfirmCompleter = null;
     _guideSweepSeenChannels.clear();
     _guideSweepStepCount = 0;
     _guideSweepNoProgressCount = 0;
     _guideSweepStartChannel = 1;
+    _channelMonitorAcked = false;
+    _xmRxBytesSinceLog = 0;
+    _xmRxFramesSinceLog = 0;
+    _lastXmRxActivityLogAt = DateTime.fromMillisecondsSinceEpoch(0);
     _txChain = Future<void>.value();
   }
 
@@ -230,7 +260,7 @@ class XmProtocolAdapter {
     updateConnectionDetail('Connecting with XM protocol...');
     logger.i('XM startup begin: port: $port transport: $transport');
 
-    for (final int baud in candidateBauds) {
+    for (final int baud in xmStartupBaudCandidates) {
       logger.d('XM startup attempt: baud: $baud');
       try {
         await serialHelper.closePort();
@@ -280,6 +310,7 @@ class XmProtocolAdapter {
       if (!configConfirmed) {
         logger.w(
             'XM post-config confirm timeout at baud: $baud, trying next baud');
+        _cancelGuideSweep(emitCompletionSentinels: false);
         _postConfigConfirmCompleter = null;
         try {
           await serialHelper.closePort();
@@ -314,6 +345,10 @@ class XmProtocolAdapter {
 
   void processData(Uint8List data, {required int maxRxBufferBytes}) {
     markRx();
+    if (data.isNotEmpty) {
+      _xmRxBytesSinceLog += data.length;
+      _logXmRxActivityIfDue();
+    }
     _buffer = Uint8List.fromList(_buffer + data);
 
     if (_buffer.length > maxRxBufferBytes) {
@@ -343,6 +378,8 @@ class XmProtocolAdapter {
 
       final List<int> frame = _buffer.sublist(0, frameLength);
       final List<int> payload = frame.sublist(4, 4 + payloadLength);
+      _xmRxFramesSinceLog++;
+      _logXmRxActivityIfDue();
       _processPayload(payload);
       _buffer = _buffer.sublist(frameLength);
     }
@@ -355,6 +392,7 @@ class XmProtocolAdapter {
 
     final XmMessageCode? code = XmMessageCode.fromByte(payload[0]);
     if (code == null) return;
+    _confirmPostConfigOnPayload(code);
     switch (code) {
       case XmMessageCode.startup:
         _startupSeen = true;
@@ -388,6 +426,9 @@ class XmProtocolAdapter {
         break;
       case XmMessageCode.channelMonitorStatus:
         _handleChannelMonitorStatus(payload);
+        break;
+      case XmMessageCode.channelMonitorAck:
+        _handleChannelMonitorAck(payload);
         break;
       case XmMessageCode.channelNameMonitor:
         _handleChannelNameMonitor(payload);
@@ -446,6 +487,14 @@ class XmProtocolAdapter {
     }
   }
 
+  void _confirmPostConfigOnPayload(XmMessageCode code) {
+    final Completer<bool>? completer = _postConfigConfirmCompleter;
+    if (completer == null || completer.isCompleted) return;
+    if (code == XmMessageCode.error) return;
+    completer.complete(true);
+    _postConfigConfirmCompleter = null;
+  }
+
   void _handleStartup(List<int> payload) {
     logger.d('XM startup payload received: length: ${payload.length}');
     if (payload.length >= 27) {
@@ -473,10 +522,6 @@ class XmProtocolAdapter {
 
   void _handleTuneCancel(List<int> payload) {
     final int channel = payload.length >= 4 ? (payload[3] & 0xFF) : 0;
-    _emitSxiDisplayAdvisory(
-      IndicationCode.scanAborted,
-      channel: channel,
-    );
   }
 
   void _handleTuneResponse(List<int> payload) {
@@ -489,6 +534,7 @@ class XmProtocolAdapter {
     }
     final int status = payload[1] & 0xFF;
     final int detail = payload[2] & 0xFF;
+    final int sid = payload[3] & 0xFF;
     final int requestedChannel = payload[4] & 0xFF;
     if (XmStatusDetail.fromStatusAndDetail(status, detail) !=
         XmStatusDetail.ok) {
@@ -516,7 +562,6 @@ class XmProtocolAdapter {
       reportError?.call(_statusMessage(payload), false);
       return;
     }
-    final int sid = payload[3] & 0xFF;
     final int channel = payload[4] & 0xFF;
     _emitSelectChannel(
       channel: channel,
@@ -533,6 +578,7 @@ class XmProtocolAdapter {
     _sendCommand(_xmExtendedInfoCommand(channel: channel), paced: true);
     _sendCommand(_xmLabelMonitorCommand(channel: channel, enable: true),
         paced: true);
+    _ensureChannelMonitor(channel: channel);
     if (channel > 0) {
       _scheduleGuideSweepStart(seedChannel: channel);
     }
@@ -790,6 +836,19 @@ class XmProtocolAdapter {
     }
   }
 
+  void _handleChannelMonitorAck(List<int> payload) {
+    if (payload.length < 3) return;
+    if (payload[1] == 0x01 && payload[2] == 0x00) {
+      _channelMonitorAcked = true;
+      _channelMonitorRetryTimer?.cancel();
+      _channelMonitorRetryTimer = null;
+      logger.i('XM channel monitor enabled: ${_hex(payload)}');
+      return;
+    }
+    logger.w('XM channel monitor ack status: ${_hex(payload)}');
+    reportError?.call(_statusMessage(payload), false);
+  }
+
   void _handleMuteResponse(List<int> payload) {
     if (payload.length < 3) return;
     if (payload[1] == 0x01 && payload[2] == 0x00) return;
@@ -855,7 +914,7 @@ class XmProtocolAdapter {
 
   void _handleXmDataControlStatus(List<int> payload) {
     if (payload.length < 3) return;
-    logger.d('XM data control status: ${_hex(payload)}');
+    logger.i('XM data control status: ${_hex(payload)}');
     if (payload.length >= 4 && payload[1] == 0x40 && payload[2] == 0xFF) {
       reportError?.call(_statusMessage(<int>[0xFF, payload[3], 0x00]), false);
     }
@@ -872,10 +931,10 @@ class XmProtocolAdapter {
 
     if (isXmAppEnvelope) {
       final int frameId = payload.length >= 4 ? payload[3] & 0xFF : 0;
-      logger.d(
+      logger.i(
           'XM data packet received: dmi: 0x${dmi.toRadixString(16).padLeft(2, '0')} frame: 0x${frameId.toRadixString(16).padLeft(2, '0')} length: $packetLen');
     } else {
-      logger.d('XM raw data packet received: length: $packetLen');
+      logger.i('XM raw data packet received: length: $packetLen');
     }
 
     final List<int> frame = <int>[
@@ -893,6 +952,19 @@ class XmProtocolAdapter {
     ];
 
     emitSxiIndication(SXiDataPacketIndication.fromBytes(frame));
+  }
+
+  void _logXmRxActivityIfDue() {
+    final DateTime now = DateTime.now();
+    if (_xmRxBytesSinceLog == 0 && _xmRxFramesSinceLog == 0) return;
+    if (now.difference(_lastXmRxActivityLogAt) < _xmRxActivityLogInterval) {
+      return;
+    }
+    logger.d(
+        'XM RX activity: bytes: $_xmRxBytesSinceLog frames: $_xmRxFramesSinceLog buffered: ${_buffer.length}');
+    _xmRxBytesSinceLog = 0;
+    _xmRxFramesSinceLog = 0;
+    _lastXmRxActivityLogAt = now;
   }
 
   bool sendMappedCommand(SXiPayload payload) {
@@ -941,13 +1013,19 @@ class XmProtocolAdapter {
             break;
           case ChanSelectionType.tuneToNextHigherChannelNumberInCategory:
             _sendTuneCommand(
-              target: (currentChannelProvider() + 1).clamp(0, 255),
+              target: _nextSubscribedChannel(
+                forward: true,
+                fallback: (currentChannelProvider() + 1).clamp(0, 255),
+              ),
               useSidMode: false,
             );
             break;
           case ChanSelectionType.tuneToNextLowerChannelNumberInCategory:
             _sendTuneCommand(
-              target: (currentChannelProvider() - 1).clamp(0, 255),
+              target: _nextSubscribedChannel(
+                forward: false,
+                fallback: (currentChannelProvider() - 1).clamp(0, 255),
+              ),
               useSidMode: false,
             );
             break;
@@ -957,6 +1035,7 @@ class XmProtocolAdapter {
             _sendCommand(
                 _xmTuneCancelCommand(
                   channel: currentChannelProvider().clamp(1, 255),
+                  dataMode: false,
                 ),
                 paced: true);
             break;
@@ -1063,9 +1142,47 @@ class XmProtocolAdapter {
       _xmTuneCommand(
         target: sanitizedTarget,
         mode: useSidMode ? XmTuneMode.sid : XmTuneMode.channel,
+        dataMode: false,
+        programType: 0x00,
+        route: 0x01,
       ),
       paced: true,
     );
+  }
+
+  int _nextSubscribedChannel({
+    required bool forward,
+    required int fallback,
+  }) {
+    final int current = currentChannelProvider().clamp(1, 255);
+    final List<int> channels = _subscribedChannelsSorted();
+    if (channels.isEmpty) {
+      return fallback;
+    }
+
+    int idx = channels.indexOf(current);
+    if (idx < 0) {
+      idx = channels.lastIndexWhere((c) => c < current);
+      if (idx < 0) {
+        idx = channels.length - 1;
+      }
+    }
+
+    final int nextIndex = forward
+        ? (idx + 1) % channels.length
+        : (idx - 1 + channels.length) % channels.length;
+    return channels[nextIndex];
+  }
+
+  List<int> _subscribedChannelsSorted() {
+    final List<int> channels = <int>[];
+    for (int ch = 1; ch <= 255; ch++) {
+      final int? sid = resolveSidFromChannel(ch);
+      if (sid != null && sid > 0 && sid != 0xFF) {
+        channels.add(ch);
+      }
+    }
+    return channels;
   }
 
   Future<void> sendConfigPayload() async {
@@ -1098,6 +1215,27 @@ class XmProtocolAdapter {
         'XM config complete: preferredChannel: $preferredChannel volume: $volume encodedVolume: $encodedVolume');
   }
 
+  void _ensureChannelMonitor({required int channel}) {
+    final int target = channel.clamp(0, 255);
+    _channelMonitorAcked = false;
+    _sendCommand(_xmChannelMonitorCommand(channel: target), paced: true);
+    _channelMonitorRetryTimer?.cancel();
+    _channelMonitorRetryTimer =
+        Timer.periodic(const Duration(seconds: 2), (Timer timer) {
+      if (_channelMonitorAcked) {
+        timer.cancel();
+        _channelMonitorRetryTimer = null;
+        return;
+      }
+      if (_xmAppBootstrapInProgress ||
+          _weatherBootstrapTuneActive ||
+          _weatherBootstrapRetuneActive) {
+        return;
+      }
+      _sendCommand(_xmChannelMonitorCommand(channel: target), paced: true);
+      logger.d('XM channel monitor retry: channel: $target');
+    });
+  }
   void _emitSubscriptionStatus({
     required int subscriptionStatus,
     required List<int> radioId,
@@ -1408,7 +1546,7 @@ class XmProtocolAdapter {
     _guideSweepRefreshTimer?.cancel();
     _guideSweepRefreshTimer = null;
     _lastGuideSweepStartedAt = DateTime.now();
-    final int start = seedChannel.clamp(1, 255);
+    final int start = seedChannel.clamp(0, 255);
     _guideSweepActive = true;
     _guideSweepSeenChannels.clear();
     _guideSweepStepCount = 0;
@@ -1425,7 +1563,7 @@ class XmProtocolAdapter {
 
   void _scheduleGuideSweepStart({required int seedChannel}) {
     _guideSweepStartTimer?.cancel();
-    final int start = seedChannel.clamp(1, 255);
+    final int start = seedChannel.clamp(0, 255);
     _guideSweepStartTimer = Timer(const Duration(seconds: 5), () {
       _guideSweepStartTimer = null;
       _startGuideSweep(seedChannel: start);
@@ -1472,7 +1610,7 @@ class XmProtocolAdapter {
 
   void _stopGuideSweep(String reason) {
     if (!_guideSweepActive) return;
-    final int restartSeed = currentChannelProvider().clamp(1, 255);
+    final int restartSeed = currentChannelProvider().clamp(0, 255);
     logger.d(
         'XM guide sweep complete: reason: $reason entries: ${_guideSweepSeenChannels.length} steps: $_guideSweepStepCount');
     _cancelGuideSweep(emitCompletionSentinels: true);
@@ -1481,7 +1619,7 @@ class XmProtocolAdapter {
 
   void _scheduleGuideSweepRefresh({required int seedChannel}) {
     _guideSweepRefreshTimer?.cancel();
-    final int start = seedChannel.clamp(1, 255);
+    final int start = seedChannel.clamp(0, 255);
     _guideSweepRefreshTimer = Timer(_guideSweepRefreshInterval, () {
       _guideSweepRefreshTimer = null;
       if (_guideSweepActive) return;
@@ -1502,7 +1640,7 @@ class XmProtocolAdapter {
     }
     _guideSweepStartTimer?.cancel();
     _guideSweepStartTimer = null;
-    _startGuideSweep(seedChannel: currentChannelProvider().clamp(1, 255));
+    _startGuideSweep(seedChannel: currentChannelProvider().clamp(0, 255));
   }
 
   void _emitGuideSweepCompleteSentinels() {
@@ -1595,6 +1733,14 @@ class XmProtocolAdapter {
   List<int> _xmRequestRadioIdCommand() =>
       <int>[XmCommandCode.requestRadioId.value];
 
+  List<int> _xmDataControlCommand({required int appId}) => <int>[
+        XmCommandCode.dataControl.value,
+        0x10,
+        appId & 0xFF,
+        appId == 0xFF ? 0x01 : ((appId >> 8) & 0xFF),
+        appId == 0xFF ? 0x01 : 0x00,
+      ];
+
   List<int> _xmExtendedInfoCommand({required int channel}) =>
       <int>[XmCommandCode.requestExtendedInfo.value, channel & 0xFF];
 
@@ -1613,8 +1759,24 @@ class XmProtocolAdapter {
     ];
   }
 
-  List<int> _xmTuneCancelCommand({required int channel}) =>
-      <int>[XmCommandCode.tuneCancel.value, channel & 0xFF, 0x00];
+  List<int> _xmChannelMonitorCommand({required int channel}) => <int>[
+        XmCommandCode.channelMonitor.value,
+        channel & 0xFF,
+        0x01,
+        0x01,
+        0x01,
+        0x01,
+      ];
+
+  List<int> _xmTuneCancelCommand({
+    required int channel,
+    required bool dataMode,
+  }) =>
+      <int>[
+        XmCommandCode.tuneCancel.value,
+        channel & 0xFF,
+        dataMode ? 0x01 : 0x00,
+      ];
 
   List<int> _xmAudioMuteCommand({required bool mute}) =>
       <int>[XmCommandCode.audioMute.value, mute ? 0x01 : 0x00];
@@ -1642,14 +1804,17 @@ class XmProtocolAdapter {
   List<int> _xmTuneCommand({
     required int target,
     required XmTuneMode mode,
+    required bool dataMode,
+    required int programType,
+    required int route,
   }) =>
       <int>[
         XmCommandCode.tune.value,
         mode.value,
         target & 0xFF,
-        0x00,
-        0x00,
-        0x01,
+        dataMode ? 0x01 : 0x00,
+        programType & 0xFF,
+        route & 0xFF,
       ];
 
   void _sendCommand(List<int> payload, {bool paced = false}) {
