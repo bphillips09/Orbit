@@ -52,13 +52,14 @@ class _TabularWeatherDialogState extends State<TabularWeatherDialog> {
       fileName: suggestedName,
       type: FileType.custom,
       allowedExtensions: const ['bin'],
+      bytes: bytes,
     );
-    if (savePath == null || savePath.isEmpty) return;
+    if (savePath == null || savePath.trim().isEmpty) return;
 
-    await File(savePath).writeAsBytes(bytes, flush: true);
+    final String outPath = savePath.trim();
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved database to $savePath')),
+        SnackBar(content: Text('Saved database to $outPath')),
       );
     }
   }
@@ -68,7 +69,7 @@ class _TabularWeatherDialogState extends State<TabularWeatherDialog> {
       allowMultiple: false,
       type: FileType.custom,
       allowedExtensions: const ['bin'],
-      withData: kIsWeb,
+      withData: kIsWeb || Platform.isAndroid,
     );
     if (result == null || result.files.isEmpty) return;
     final PlatformFile f = result.files.first;

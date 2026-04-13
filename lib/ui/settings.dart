@@ -2362,20 +2362,13 @@ class SettingsPage extends StatelessWidget {
       );
       if (savePath == null || savePath.trim().isEmpty) return;
 
-      var outPath = savePath;
-      if (!outPath.toLowerCase().endsWith('.orbit')) {
-        outPath = '$outPath.orbit';
-      }
-
-      final outFile = File(outPath);
-      if (!await outFile.exists()) {
-        await outFile.writeAsBytes(bytes, flush: true);
-      }
+      final outPath = savePath.trim();
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Exported $exportLabel to $outPath')),
       );
     } catch (e) {
+      logger.e('Error exporting snapshot file', error: e);
       if (!context.mounted) return;
       await showDialog<void>(
         context: context,
