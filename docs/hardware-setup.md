@@ -37,7 +37,7 @@ This guide shows how to wire the SXV300 to a USB UART, audio input, and power. T
 
 | Pin | SXV300 | Dynavin Cable | UART Adapter |
 | --- | --- | --- | --- |
-| 1 | GND $\color{green}{\blacksquare}$ | GND $\color{blue}{\blacksquare}$ | GND |
+| 1 | GND $\color{green}{\blacksquare}$ | GND $\color{blue}{\blacksquare}$ | GND (optional)|
 | 2 | 12V $\color{red}{\blacksquare}$ | 12V $\color{yellow}{\blacksquare}$ |  |
 | 3 | Power Enable $\color{blue}{\blacksquare}$ | Power Enable $\color{orange}{\blacksquare}$ |  |
 | 4 | Audio R $\color{purple}{\blacksquare}$ | Audio R $\color{red}{\blacksquare}$ |  |
@@ -55,7 +55,7 @@ This guide shows how to wire the SXV300 to a USB UART, audio input, and power. T
 
 Wiring tips:
 - UART TX connects to device RX; UART RX connects to device TX.
-- UART GND connects to device GND.
+- UART GND connects to device GND (optional - not needed for most setups).
 - Audio L/R to your audio input’s L/R; Audio GND to audio ground/shield as appropriate.
 - Power Enable can be tied to +12V (or a head unit “amp/ACC” enable) to turn the tuner on.
 - Vehicle use: connect +12V to the battery or switched ACC with an inline fuse.
@@ -81,7 +81,7 @@ Power
   12V DC Adapter (1A) ----> 12V rail
 
 SXV300 Tuner
-  Pin 1: GND   <------ Common ground (UART GND, Audio GND)
+  Pin 1: GND   <------ Common ground
   Pin 2: 12V   <------ 12V rail (fused)
   Pin 3: PwrEn <------ 12V rail or ACC/AMP enable
   Pin 4: Audio R ----> Audio Right
@@ -97,13 +97,20 @@ Optional Dynavin female cable
 ```
 
 ### Known-Working Adapters for All Platforms
-- [USB UART](https://www.amazon.com/dp/B09F3196FB)
+- USB UART:
+    * [USB-C board](https://www.amazon.com/dp/B09F3196FB)
+    * [USB-A board](https://www.amazon.com/dp/B0DXFBCDC7)
+    * [USB-A cable](https://www.amazon.com/dp/B0G2LSLBY7)
 - [USB Audio-in](https://www.amazon.com/dp/B00NMXY2MO)
 - [12V 1A DC Power Supply](https://www.amazon.com/dp/B0BX5F3562)
 - [12V Cigarette Lighter Adapters](https://www.amazon.com/dp/B0CNJQC7T3)
 - [Analog Audio Breakout Cable](https://www.amazon.com/dp/B0CQXSR3MV)
 - [Dynavin Adapter Cable](https://dynavinnorthamerica.com/products/siriusxm-adapter-cable-for-the-dynavin-n7-only)
 - [Dual USB Hub](https://www.amazon.com/dp/B098L7WJ4C)
+
+### Pre-Modified Tuners
+
+For those who would prefer to purchase a plug/play SXV300 for use with an Android-based head unit, [MattDevoCustoms](https://mattdevocustoms.com/products/siriusxm-satellite-radio-tuner-for-android-based-head-units) offers pre-modified units.
 
 ## InfoLink
 
