@@ -108,6 +108,10 @@ Optional Dynavin female cable
 - [Dynavin Adapter Cable](https://dynavinnorthamerica.com/products/siriusxm-adapter-cable-for-the-dynavin-n7-only)
 - [Dual USB Hub](https://www.amazon.com/dp/B098L7WJ4C)
 
+### Pre-Modified Tuners
+
+For those who would prefer to purchase a plug/play SXV300 for use with an Android-based head unit, [MattDevoCustoms](https://mattdevocustoms.com/products/siriusxm-satellite-radio-tuner-for-android-based-head-units) offers pre-modified units.
+
 ## InfoLink
 
 Navico sells the same InfoLink hardware under several brands. As far as currently known, these units appear to be functionally identical and only differ by the network cable wiring / default network address:
