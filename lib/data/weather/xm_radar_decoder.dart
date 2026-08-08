@@ -135,9 +135,9 @@ class XmRadarDecoder {
     maxLon: -52.0,
   );
 
-  static _BaseNexradCache? _lastBaseNexradCache;
+  _BaseNexradCache? _lastBaseNexradCache;
 
-  static Future<XmRadarDecodeResult?> decodeAsync(List<int> message) async {
+  Future<XmRadarDecodeResult?> decodeAsync(List<int> message) async {
     final XmRadarPacket? packet = XmRadarPacket.parse(message);
     if (packet == null) return null;
 
@@ -161,7 +161,7 @@ class XmRadarDecoder {
     }
   }
 
-  static XmRadarDecodeResult _resultFromPackedMode(XmRadarPacket packet) {
+  XmRadarDecodeResult _resultFromPackedMode(XmRadarPacket packet) {
     final _RadarPlane? plane = _decodePackedMode(packet);
     if (plane == null) {
       return XmRadarDecodeResult(
@@ -179,7 +179,7 @@ class XmRadarDecoder {
     );
   }
 
-  static XmRadarDecodeResult _resultFromOddModeIndices(
+  XmRadarDecodeResult _resultFromOddModeIndices(
     XmRadarPacket packet,
     Uint8List? indices,
   ) {
@@ -217,7 +217,7 @@ class XmRadarDecoder {
     );
   }
 
-  static _RadarPlane? _decodePackedMode(XmRadarPacket packet) {
+  _RadarPlane? _decodePackedMode(XmRadarPacket packet) {
     if (packet.payload.length < 8) return null;
 
     final int stage1Length = _u32le(packet.payload, 0);
@@ -361,7 +361,7 @@ class XmRadarDecoder {
     );
   }
 
-  static _RadarPlane _finalizeDecodedPlane(
+  _RadarPlane _finalizeDecodedPlane(
     XmRadarPacket packet,
     _RadarPlane plane,
   ) {
@@ -377,7 +377,7 @@ class XmRadarDecoder {
     return _postProcessPlane(packet, mergedPlane);
   }
 
-  static _RadarPlane _mergeConvectivePlane(
+  _RadarPlane _mergeConvectivePlane(
     XmRadarPacket packet,
     _RadarPlane plane,
   ) {

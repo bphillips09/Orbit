@@ -8,9 +8,11 @@ import 'package:orbit/sxi_layer.dart';
 // XMApp packet processor
 class XmAppProcessor {
   final SXiLayer sxiLayer;
+  final XmRadarDecoder _radarDecoder = XmRadarDecoder();
   final Map<String, _XmAppStreamState> _streams = <String, _XmAppStreamState>{};
   final Set<String> _seenRadarFrames = <String>{};
   final Set<String> _reportedRadarDecodeIssues = <String>{};
+  Future<void> _radarDecodeChain = Future<void>.value();
   static const Map<int, String> _productNames = <int, String>{
     0x01: 'NEXRAD Radar',
     0x02: 'SCITs',
@@ -239,14 +241,20 @@ class XmAppProcessor {
     if (_isRadarProduct(productId)) {
       logger.i(
           'XMApp radar product dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) len=${message.length}');
-      unawaited(_handleRadarProduct(
-        streamKey: streamKey,
-        dmi: dmi,
-        dmiName: dmiName,
-        productId: productId,
-        productName: productName,
-        message: List<int>.from(message),
-      ));
+      final List<int> messageCopy = List<int>.from(message);
+      _radarDecodeChain = _radarDecodeChain
+          .then((_) => _handleRadarProduct(
+                streamKey: streamKey,
+                dmi: dmi,
+                dmiName: dmiName,
+                productId: productId,
+                productName: productName,
+                message: messageCopy,
+              ))
+          .catchError((Object error, StackTrace stack) {
+        logger.w(
+            'XMApp radar decode chain error dmi=${_hexId(dmi)} id=${_hexId(productId)}: $error');
+      });
       return;
     }
 
@@ -268,7 +276,7 @@ class XmAppProcessor {
     required List<int> message,
   }) async {
     final XmRadarDecodeResult? result =
-        await XmRadarDecoder.decodeAsync(message);
+        await _radarDecoder.decodeAsync(message);
     if (result == null) {
       logger.w(
           'XMApp radar packet rejected dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) len=${message.length}');

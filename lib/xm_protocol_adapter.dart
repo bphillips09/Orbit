@@ -233,6 +233,7 @@ class XmProtocolAdapter {
   int _weatherBootstrapReturnChannel = 1;
   Completer<void>? _weatherBootstrapTuneConfirmedCompleter;
   bool _xmAppBootstrapInProgress = false;
+  int _weatherBootstrapSession = 0;
   bool _channelMonitorAcked = false;
   int _xmRxBytesSinceLog = 0;
   int _xmRxFramesSinceLog = 0;
@@ -261,11 +262,7 @@ class XmProtocolAdapter {
     _guideSweepStepCount = 0;
     _guideSweepNoProgressCount = 0;
     _guideSweepStartChannel = 1;
-    _weatherBootstrapTuneActive = false;
-    _weatherBootstrapRetuneActive = false;
-    _weatherBootstrapReturnChannel = 1;
-    _weatherBootstrapTuneConfirmedCompleter = null;
-    _xmAppBootstrapInProgress = false;
+    _abortWeatherBootstrap(reason: 'reset');
     _channelMonitorAcked = false;
     _xmRxBytesSinceLog = 0;
     _xmRxFramesSinceLog = 0;
@@ -572,8 +569,11 @@ class XmProtocolAdapter {
       logger.i(
           'XM weather bootstrap data tune confirmed: ${_statusMessage(payload)} (UI tune suppressed)');
       _weatherBootstrapTuneActive = false;
-      _weatherBootstrapTuneConfirmedCompleter?.complete();
+      final Completer<void>? completer = _weatherBootstrapTuneConfirmedCompleter;
       _weatherBootstrapTuneConfirmedCompleter = null;
+      if (completer != null && !completer.isCompleted) {
+        completer.complete();
+      }
       return;
     }
     if (_weatherBootstrapRetuneActive &&
@@ -1190,8 +1190,7 @@ class XmProtocolAdapter {
     required int target,
     required bool useSidMode,
   }) {
-    _weatherBootstrapTuneActive = false;
-    _weatherBootstrapRetuneActive = false;
+    _abortWeatherBootstrap(reason: 'user tune');
     _cancelGuideSweep(emitCompletionSentinels: true);
     final int sanitizedTarget = target.clamp(0, 255);
     logger.d(
@@ -1296,6 +1295,7 @@ class XmProtocolAdapter {
       return;
     }
     _xmAppBootstrapInProgress = true;
+    final int session = ++_weatherBootstrapSession;
     final List<int> requestIds = _xmAppBootstrapRequestIds();
 
     try {
@@ -1321,20 +1321,33 @@ class XmProtocolAdapter {
       try {
         await _weatherBootstrapTuneConfirmedCompleter!.future
             .timeout(const Duration(seconds: 3));
-      } catch (_) {
+      } on TimeoutException {
+        if (!_isWeatherBootstrapSession(session)) return;
         logger.w('XM weather bootstrap data tune confirm timeout');
       } finally {
-        _weatherBootstrapTuneConfirmedCompleter = null;
+        if (_weatherBootstrapTuneConfirmedCompleter != null) {
+          _weatherBootstrapTuneConfirmedCompleter = null;
+        }
       }
-      await Future<void>.delayed(_xmWeatherBootstrapTuneDelay);
+      if (!await _weatherBootstrapDelay(
+          _xmWeatherBootstrapTuneDelay, session)) {
+        return;
+      }
       logger.i(
           'XM weather bootstrap request profile: appId: $_xmWeatherPrimaryAppId subIdRange: $_xmWeatherSubIdStart-${_xmWeatherSubIdStart + _xmWeatherSubIdWindowSize - 1} skip: $_xmWeatherSubIdSkip');
       for (final int appId in requestIds) {
+        if (!_isWeatherBootstrapSession(session)) return;
         _registerXmAppDmiMapping(appId);
         _sendCommand(_xmDataControlCommand(appId: appId), paced: true);
-        await Future<void>.delayed(_xmWeatherBootstrapProductSpacing);
+        if (!await _weatherBootstrapDelay(
+            _xmWeatherBootstrapProductSpacing, session)) {
+          return;
+        }
       }
-      await Future<void>.delayed(_xmWeatherBootstrapRetuneDelay);
+      if (!await _weatherBootstrapDelay(
+          _xmWeatherBootstrapRetuneDelay, session)) {
+        return;
+      }
       _weatherBootstrapRetuneActive = true;
       _sendCommand(
         _xmTuneCommand(
@@ -1346,12 +1359,46 @@ class XmProtocolAdapter {
         ),
         paced: true,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (!await _weatherBootstrapDelay(
+          const Duration(milliseconds: 700), session)) {
+        return;
+      }
       _ensureChannelMonitor(channel: returnChannel);
       _scheduleGuideSweepStart(seedChannel: 0);
     } finally {
-      _xmAppBootstrapInProgress = false;
+      if (_isWeatherBootstrapSession(session)) {
+        _xmAppBootstrapInProgress = false;
+        _weatherBootstrapTuneActive = false;
+        _weatherBootstrapRetuneActive = false;
+      }
     }
+  }
+
+  void _abortWeatherBootstrap({required String reason}) {
+    final bool wasActive = _xmAppBootstrapInProgress ||
+        _weatherBootstrapTuneActive ||
+        _weatherBootstrapRetuneActive ||
+        _weatherBootstrapTuneConfirmedCompleter != null;
+    _weatherBootstrapSession++;
+    _weatherBootstrapTuneActive = false;
+    _weatherBootstrapRetuneActive = false;
+    _xmAppBootstrapInProgress = false;
+    final Completer<void>? completer = _weatherBootstrapTuneConfirmedCompleter;
+    _weatherBootstrapTuneConfirmedCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+    if (wasActive) {
+      logger.d('XM weather bootstrap aborted: $reason');
+    }
+  }
+
+  bool _isWeatherBootstrapSession(int session) =>
+      session == _weatherBootstrapSession;
+
+  Future<bool> _weatherBootstrapDelay(Duration delay, int session) async {
+    await Future<void>.delayed(delay);
+    return _isWeatherBootstrapSession(session);
   }
 
   List<int> _xmAppBootstrapRequestIds() {
