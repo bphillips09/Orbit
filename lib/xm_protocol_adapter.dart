@@ -160,12 +160,25 @@ class XmProtocolAdapter {
     required this.reportError,
     required this.updateRadioId,
     required this.updateChannelData,
+    required this.shouldBootstrapXmWeather,
     List<int>? xmStartupBaudCandidates,
   }) : xmStartupBaudCandidates = xmStartupBaudCandidates != null
             ? List<int>.unmodifiable(xmStartupBaudCandidates)
             : List<int>.unmodifiable(candidateBauds);
 
   static const List<int> candidateBauds = <int>[9600, 38400, 115200];
+  static const int _xmWeatherPrimaryAppId = 0x0A;
+  static const int _xmWeatherSubIdStart = 0xE6;
+  static const int _xmWeatherSubIdWindowSize = 9; // 230..238
+  static const int _xmWeatherSubIdSkip = 0xE9; // Skips 233
+  static const int _xmWeatherDataSid = 0xF0;
+  static const Duration _xmWeatherBootstrapTuneDelay =
+      Duration(milliseconds: 750);
+  static const Duration _xmWeatherBootstrapProductSpacing =
+      Duration(milliseconds: 500);
+  static const Duration _xmWeatherBootstrapRetuneDelay =
+      Duration(milliseconds: 500);
+
   // XM baud try-order from saved baud setting
   static List<int> candidateBaudsForSavedBaud(int savedBaud) {
     if (!candidateBauds.contains(savedBaud)) {
@@ -199,6 +212,7 @@ class XmProtocolAdapter {
   final void Function(List<int> radioId)? updateRadioId;
   final void Function(int sid, String artist, String song, int programId)?
       updateChannelData;
+  final bool Function() shouldBootstrapXmWeather;
 
   Uint8List _buffer = Uint8List(0);
   Completer<bool>? _initCompleter;
@@ -214,6 +228,11 @@ class XmProtocolAdapter {
   int _guideSweepStepCount = 0;
   int _guideSweepNoProgressCount = 0;
   int _guideSweepStartChannel = 1;
+  bool _weatherBootstrapTuneActive = false;
+  bool _weatherBootstrapRetuneActive = false;
+  int _weatherBootstrapReturnChannel = 1;
+  Completer<void>? _weatherBootstrapTuneConfirmedCompleter;
+  bool _xmAppBootstrapInProgress = false;
   bool _channelMonitorAcked = false;
   int _xmRxBytesSinceLog = 0;
   int _xmRxFramesSinceLog = 0;
@@ -242,6 +261,11 @@ class XmProtocolAdapter {
     _guideSweepStepCount = 0;
     _guideSweepNoProgressCount = 0;
     _guideSweepStartChannel = 1;
+    _weatherBootstrapTuneActive = false;
+    _weatherBootstrapRetuneActive = false;
+    _weatherBootstrapReturnChannel = 1;
+    _weatherBootstrapTuneConfirmedCompleter = null;
+    _xmAppBootstrapInProgress = false;
     _channelMonitorAcked = false;
     _xmRxBytesSinceLog = 0;
     _xmRxFramesSinceLog = 0;
@@ -522,6 +546,12 @@ class XmProtocolAdapter {
 
   void _handleTuneCancel(List<int> payload) {
     final int channel = payload.length >= 4 ? (payload[3] & 0xFF) : 0;
+    _sendCommand(
+        _xmTuneCancelCommand(
+          channel: channel,
+          dataMode: false,
+        ),
+        paced: true);
   }
 
   void _handleTuneResponse(List<int> payload) {
@@ -536,6 +566,23 @@ class XmProtocolAdapter {
     final int detail = payload[2] & 0xFF;
     final int sid = payload[3] & 0xFF;
     final int requestedChannel = payload[4] & 0xFF;
+    if (_weatherBootstrapTuneActive &&
+        requestedChannel == _xmWeatherDataSid &&
+        sid == _xmWeatherDataSid) {
+      logger.i(
+          'XM weather bootstrap data tune confirmed: ${_statusMessage(payload)} (UI tune suppressed)');
+      _weatherBootstrapTuneActive = false;
+      _weatherBootstrapTuneConfirmedCompleter?.complete();
+      _weatherBootstrapTuneConfirmedCompleter = null;
+      return;
+    }
+    if (_weatherBootstrapRetuneActive &&
+        requestedChannel == _weatherBootstrapReturnChannel) {
+      logger.i(
+          'XM weather bootstrap return tune confirmed: ${_statusMessage(payload)} (UI tune suppressed)');
+      _weatherBootstrapRetuneActive = false;
+      return;
+    }
     if (XmStatusDetail.fromStatusAndDetail(status, detail) !=
         XmStatusDetail.ok) {
       if (XmStatusDetail.fromStatusAndDetail(status, detail) ==
@@ -915,6 +962,16 @@ class XmProtocolAdapter {
   void _handleXmDataControlStatus(List<int> payload) {
     if (payload.length < 3) return;
     logger.i('XM data control status: ${_hex(payload)}');
+    if (payload.length >= 5 &&
+        payload[1] == 0x40 &&
+        payload[2] == 0x01 &&
+        payload[3] == 0x00) {
+      final int appId = payload[4] & 0xFF;
+      if (_isXmWeatherBootstrapAppId(appId)) {
+        logger.i(
+            'XM App Id 0x${appId.toRadixString(16).padLeft(2, '0')} data delivery confirmed');
+      }
+    }
     if (payload.length >= 4 && payload[1] == 0x40 && payload[2] == 0xFF) {
       reportError?.call(_statusMessage(<int>[0xFF, payload[3], 0x00]), false);
     }
@@ -996,6 +1053,15 @@ class XmProtocolAdapter {
               paced: true);
         }
         return true;
+      case SXiMonitorDataServiceCommand():
+        final bool enable = payload.updateType ==
+            DataServiceMonitorUpdateType.startMonitorForService;
+        if (enable && isXmWeatherDataService(payload.dataType)) {
+          logger.i(
+              'XM weather data service enabled (${payload.dataType.name}); requesting bootstrap');
+          unawaited(_requestXmAppBootstrap());
+        }
+        return true;
       case SXiSelectChannelCommand():
         final int target = payload.channelIDorSID.clamp(0, 255);
         switch (payload.selectionType) {
@@ -1028,16 +1094,6 @@ class XmProtocolAdapter {
               ),
               useSidMode: false,
             );
-            break;
-          case ChanSelectionType.stopScanAndContinuePlaybackOfCurrentTrack:
-          case ChanSelectionType
-                .abortScanAndResumePlaybackOfItemActiveAtScanInitiation:
-            _sendCommand(
-                _xmTuneCancelCommand(
-                  channel: currentChannelProvider().clamp(1, 255),
-                  dataMode: false,
-                ),
-                paced: true);
             break;
           default:
             logger.d(
@@ -1134,6 +1190,8 @@ class XmProtocolAdapter {
     required int target,
     required bool useSidMode,
   }) {
+    _weatherBootstrapTuneActive = false;
+    _weatherBootstrapRetuneActive = false;
     _cancelGuideSweep(emitCompletionSentinels: true);
     final int sanitizedTarget = target.clamp(0, 255);
     logger.d(
@@ -1210,7 +1268,14 @@ class XmProtocolAdapter {
     _sendCommand(
         _xmLabelMonitorCommand(channel: preferredChannel, enable: true),
         paced: true);
-    _scheduleGuideSweepStart(seedChannel: preferredChannel);
+    if (shouldBootstrapXmWeather()) {
+      unawaited(_requestXmAppBootstrap());
+    } else {
+      logger
+          .d('XM weather bootstrap skipped: no weather data services enabled');
+      _ensureChannelMonitor(channel: preferredChannel);
+      _scheduleGuideSweepStart(seedChannel: 0);
+    }
 
     final int volume = volumeProvider().clamp(-96, 24);
     final int encodedVolume = volume > 0 ? 0x60 + volume : -volume;
@@ -1219,6 +1284,111 @@ class XmProtocolAdapter {
     _sendCommand(_xmAudioMuteCommand(mute: false), paced: true);
     logger.d(
         'XM config complete: preferredChannel: $preferredChannel volume: $volume encodedVolume: $encodedVolume');
+  }
+
+  Future<void> _requestXmAppBootstrap() async {
+    if (!shouldBootstrapXmWeather()) {
+      logger.d('XM weather bootstrap skipped: weather data services disabled');
+      return;
+    }
+    if (_xmAppBootstrapInProgress) {
+      logger.d('XM weather bootstrap already in progress; skipping duplicate');
+      return;
+    }
+    _xmAppBootstrapInProgress = true;
+    final List<int> requestIds = _xmAppBootstrapRequestIds();
+
+    try {
+      // Tune SID 0xF0 in data mode, request weather App IDs, then return to audio
+      final int returnChannel = currentChannelProvider().clamp(1, 255);
+      _weatherBootstrapReturnChannel = returnChannel;
+      _weatherBootstrapTuneActive = true;
+      _weatherBootstrapTuneConfirmedCompleter = Completer<void>();
+      _sendCommand(
+        _xmTuneCancelCommand(channel: _xmWeatherDataSid, dataMode: true),
+        paced: true,
+      );
+      _sendCommand(
+        _xmTuneCommand(
+          target: _xmWeatherDataSid,
+          mode: XmTuneMode.sid,
+          dataMode: true,
+          programType: 0x00,
+          route: 0x02,
+        ),
+        paced: true,
+      );
+      try {
+        await _weatherBootstrapTuneConfirmedCompleter!.future
+            .timeout(const Duration(seconds: 3));
+      } catch (_) {
+        logger.w('XM weather bootstrap data tune confirm timeout');
+      } finally {
+        _weatherBootstrapTuneConfirmedCompleter = null;
+      }
+      await Future<void>.delayed(_xmWeatherBootstrapTuneDelay);
+      logger.i(
+          'XM weather bootstrap request profile: appId: $_xmWeatherPrimaryAppId subIdRange: $_xmWeatherSubIdStart-${_xmWeatherSubIdStart + _xmWeatherSubIdWindowSize - 1} skip: $_xmWeatherSubIdSkip');
+      for (final int appId in requestIds) {
+        _registerXmAppDmiMapping(appId);
+        _sendCommand(_xmDataControlCommand(appId: appId), paced: true);
+        await Future<void>.delayed(_xmWeatherBootstrapProductSpacing);
+      }
+      await Future<void>.delayed(_xmWeatherBootstrapRetuneDelay);
+      _weatherBootstrapRetuneActive = true;
+      _sendCommand(
+        _xmTuneCommand(
+          target: returnChannel,
+          mode: XmTuneMode.channel,
+          dataMode: false,
+          programType: 0x00,
+          route: 0x01,
+        ),
+        paced: true,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      _ensureChannelMonitor(channel: returnChannel);
+      _scheduleGuideSweepStart(seedChannel: 0);
+    } finally {
+      _xmAppBootstrapInProgress = false;
+    }
+  }
+
+  List<int> _xmAppBootstrapRequestIds() {
+    final List<int> ids = <int>[_xmWeatherPrimaryAppId];
+    for (int id = _xmWeatherSubIdStart;
+        id < _xmWeatherSubIdStart + _xmWeatherSubIdWindowSize;
+        id++) {
+      if (id == _xmWeatherSubIdSkip) continue;
+      ids.add(id & 0xFF);
+    }
+    return ids;
+  }
+
+  bool _isXmWeatherBootstrapAppId(int appId) {
+    final int id = appId & 0xFF;
+    if (id == _xmWeatherPrimaryAppId) return true;
+    final int endExclusive = _xmWeatherSubIdStart + _xmWeatherSubIdWindowSize;
+    return id >= _xmWeatherSubIdStart &&
+        id < endExclusive &&
+        id != _xmWeatherSubIdSkip;
+  }
+
+  static bool isXmWeatherDataService(DataServiceIdentifier dsi) {
+    switch (dsi) {
+      case DataServiceIdentifier.xmWxWeatherAppId10:
+      case DataServiceIdentifier.xmWxWeatherAppId230:
+      case DataServiceIdentifier.xmWxWeatherAppId231:
+      case DataServiceIdentifier.xmWxWeatherAppId232:
+      case DataServiceIdentifier.xmWxWeatherAppId234:
+      case DataServiceIdentifier.xmWxWeatherAppId235:
+      case DataServiceIdentifier.xmWxWeatherAppId236:
+      case DataServiceIdentifier.xmWxWeatherAppId237:
+      case DataServiceIdentifier.xmWxWeatherAppId238:
+        return true;
+      default:
+        return false;
+    }
   }
 
   void _ensureChannelMonitor({required int channel}) {
@@ -1237,6 +1407,18 @@ class XmProtocolAdapter {
       logger.d('XM channel monitor retry: channel: $target');
     });
   }
+
+  void _registerXmAppDmiMapping(int appId) {
+    final DataServiceIdentifier? dsi =
+        DataServiceIdentifier.xmAppDsiForAppId(appId);
+    if (dsi == null) {
+      logger.t(
+          'XMApp AppId has no known DSI mapping yet: 0x${(appId & 0xFF).toRadixString(16).padLeft(2, '0')}');
+      return;
+    }
+    DataServiceIdentifier.addDMI(dsi.value, <int>[appId]);
+  }
+
   void _emitSubscriptionStatus({
     required int subscriptionStatus,
     required List<int> radioId,

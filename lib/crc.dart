@@ -1,4 +1,4 @@
-// CRC32, calculates the CRC32 of a given buffer
+// CRC helpers
 class CRC32 {
   static final List<int> crc32Table = _generateCrc32Table();
 
@@ -32,5 +32,27 @@ class CRC32 {
   static bool check(List<int> buffer, int crc) {
     int calculatedCrc = calculate(buffer);
     return calculatedCrc == crc;
+  }
+}
+
+// CRC-16/XMODEM-style
+class CRC16 {
+  static int calculate(List<int> buffer) {
+    int crc = 0xFFFF;
+    for (final int byte in buffer) {
+      crc ^= ((byte & 0xFF) << 8);
+      for (int i = 0; i < 8; i++) {
+        if ((crc & 0x8000) != 0) {
+          crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
+        } else {
+          crc = (crc << 1) & 0xFFFF;
+        }
+      }
+    }
+    return (~crc) & 0xFFFF;
+  }
+
+  static bool check(List<int> buffer, int crc) {
+    return calculate(buffer) == crc;
   }
 }

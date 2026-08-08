@@ -70,6 +70,48 @@ enum DataServiceIdentifier {
     return DataServiceIdentifier.values.firstWhere((x) => x.value == i,
         orElse: () => throw ArgumentError('Invalid DataType value: $i'));
   }
+
+  static DataServiceIdentifier? xmAppDsiForAppId(int appId) {
+    switch (appId & 0xFFFF) {
+      case 0x08:
+        return DataServiceIdentifier.xmNavTraffic;
+      case 0x0A:
+        return DataServiceIdentifier.xmWxWeatherAppId10;
+      case 0x0E:
+        return DataServiceIdentifier.xmNavWeather;
+      case 0x32:
+      case 0x33:
+      case 0x34:
+      case 0x35:
+        return DataServiceIdentifier.stockTickers;
+      case 0x3C:
+      case 0x3D:
+      case 0x3E:
+      case 0x3F:
+        return DataServiceIdentifier.sports;
+      case 0x46:
+      case 0x47:
+        return DataServiceIdentifier.channelGraphicsUpdates;
+      case 0xE6:
+        return DataServiceIdentifier.xmWxWeatherAppId230;
+      case 0xE7:
+        return DataServiceIdentifier.xmWxWeatherAppId231;
+      case 0xE8:
+        return DataServiceIdentifier.xmWxWeatherAppId232;
+      case 0xEA:
+        return DataServiceIdentifier.xmWxWeatherAppId234;
+      case 0xEB:
+        return DataServiceIdentifier.xmWxWeatherAppId235;
+      case 0xEC:
+        return DataServiceIdentifier.xmWxWeatherAppId236;
+      case 0xED:
+        return DataServiceIdentifier.xmWxWeatherAppId237;
+      case 0xEE:
+        return DataServiceIdentifier.xmWxWeatherAppId238;
+      default:
+        return null;
+    }
+  }
 }
 
 // Device error codes

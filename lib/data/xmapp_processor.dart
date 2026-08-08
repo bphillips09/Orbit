@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'package:orbit/crc.dart';
 import 'package:orbit/logging.dart';
+import 'package:orbit/data/weather/xm_radar_decoder.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/sxi_layer.dart';
 
@@ -6,103 +9,73 @@ import 'package:orbit/sxi_layer.dart';
 class XmAppProcessor {
   final SXiLayer sxiLayer;
   final Map<String, _XmAppStreamState> _streams = <String, _XmAppStreamState>{};
-  static const Map<int, String> _dmiNames = <int, String>{
-    0x08: 'XM NavTraffic',
-    0x0A: 'AppID 10 Wx Products',
-    0x0E: 'XM NavWeather',
-    0x14: 'Proprietary',
-    0x15: 'Proprietary',
-    0x16: 'Proprietary',
-    0x32: 'Stock Symbols',
-    0x33: 'Stock Values',
-    0x34: 'Stock Extended Values',
-    0x35: 'Stock/Sports - Provider IDs',
-    0x3C: 'Sports - Menu Item',
-    0x3D: 'Sports - Menu Level',
-    0x3E: 'Sports - Menu Display',
-    0x3F: 'Sports - Menu Alert',
-    0x40: 'Proprietary',
-    0x41: 'Proprietary',
-    0x46: 'Channel Graphics - Logos',
-    0x47: 'Channel Graphics - References',
-    0x4D: 'Proprietary',
-    0x65: 'Proprietary',
-    0x66: 'Proprietary',
-    0x67: 'Proprietary',
-    0x68: 'Proprietary',
-    0xE6: 'AppID 230 Wx Products',
-    0xE7: 'AppID 231 Wx Products',
-    0xE8: 'AppID 232 Wx Products',
-    0xEA: 'AppID 234 Wx Products',
-    0xEB: 'AppID 235 Wx Products',
-    0xEC: 'AppID 236 Wx Products',
-    0xED: 'AppID 237 Wx Products',
-    0xEE: 'AppID 238 Wx Products',
-    0x100: 'Proprietary',
-    0x13F: 'Proprietary',
-  };
+  final Set<String> _seenRadarFrames = <String>{};
+  final Set<String> _reportedRadarDecodeIssues = <String>{};
   static const Map<int, String> _productNames = <int, String>{
     0x01: 'NEXRAD Radar',
-    0x02: 'County Warnings',
-    0x03: 'Storm Cell Attributes',
-    0x04: 'Storm Tracks',
-    0x05: 'Lightning',
-    0x06: 'Echo Tops',
-    0x07: 'Severe Storm Watches',
-    0x08: 'Surface Analysis',
-    0x09: 'City Forecast',
-    0x0A: 'Marine Zone Forecast',
-    0x0B: 'County Forecast',
-    0x0C: 'Wind Aloft',
-    0x0D: 'METAR',
-    0x0E: 'TAF',
-    0x0F: 'AIRMET',
-    0x10: 'SIGMET',
-    0x11: 'Convective SIGMET',
-    0x12: 'PIREP',
-    0x13: 'TFR',
-    0x14: 'Freezing Level',
-    0x15: 'Icing',
-    0x16: 'Turbulence',
-    0x17: 'Satellite Cloud Tops',
-    0x18: 'Satellite Infrared',
-    0x19: 'Satellite Visible',
-    0x1A: 'Surface Forecast',
+    0x02: 'SCITs',
+    0x03: 'Shear',
+    0x04: 'Coverage',
+    0x05: 'METAR',
+    0x06: 'Lightning Strike',
+    0x07: 'Echo Tops',
+    0x08: 'Precip Type',
+    0x09: 'Wind Data',
+    0x0B: 'Generic Grid 0x0B',
+    0x0C: 'Generic Grid 0x0C',
+    0x0D: 'Generic Grid 0x0D',
+    0x0E: 'Generic Grid 0x0E',
+    0x0F: 'Generic Grid 0x0F',
+    0x10: 'Generic Grid 0x10',
+    0x11: 'Cyclone Advisory',
+    0x12: 'Generic Grid 0x12',
+    0x13: 'Generic Grid 0x13',
+    0x14: 'Generic Grid 0x14',
+    0x15: 'Generic Grid 0x15',
+    0x17: 'Generic Grid 0x17',
+    0x18: 'Generic Grid 0x18',
+    0x19: 'Generic Grid 0x19',
     0x1B: 'Hurricane Track',
-    0x1C: 'Radar Mosaic (Regional)',
-    0x1D: 'Radar Mosaic (CONUS)',
-    0x1E: 'Forecast / Advisory',
+    0x1C: 'AIRMET',
+    0x1D: 'Convective Radar',
     0x1F: 'Weather Text Advisory',
-    0x20: 'Marine Advisory',
-    0x21: 'Surface / Marine Analysis',
-    0x22: 'Lightning Density / Strike Grid',
-    0x23: 'Weather Product 0x23',
-    0x24: 'Weather Product 0x24',
-    0x25: 'Weather Product 0x25',
-    0x26: 'Weather Product 0x26',
-    0x27: 'Weather Product 0x27',
-    0x28: 'Weather Product 0x28',
-    0x29: 'Weather Product 0x29',
-    0x2A: 'Weather Product 0x2A',
-    0x2B: 'Weather Product 0x2B',
-    0x2C: 'Weather Product 0x2C',
-    0x2D: 'Weather Product 0x2D',
-    0x2E: 'Weather Product 0x2E',
-    0x2F: 'Weather Product 0x2F',
+    0x22: '0C Isotherm',
+    0x23: 'TFR',
+    0x24: 'City Forecast',
+    0x25: 'Surface Analysis',
+    0x26: 'Turbulence',
+    0x27: 'CIP',
+    0x28: 'SLD',
+    0x2A: 'TAF',
+    0x2F: 'Raw Product 0x2F',
+    0x30: 'Raw Product 0x30',
+    0x31: 'Raw Product 0x31',
+    0x32: 'SatIR',
     0x33: 'PR Radar',
-    0x34: 'PR Radar (Alt)',
-    0x55: 'XMLink Product 0x55',
-    0x63: 'XMLink Product 0x63',
-    0x80: 'XMLink Product 0x80',
-    0xE5: 'Wx Product Family 229',
-    0xE6: 'Wx Product Family 230',
-    0xE7: 'Wx Product Family 231',
-    0xE8: 'Wx Product Family 232',
-    0xEA: 'Wx Product Family 234',
-    0xEB: 'Wx Product Family 235',
-    0xEC: 'Wx Product Family 236',
-    0xED: 'Wx Product Family 237',
-    0xEE: 'Wx Product Family 238',
+    0x34: 'Convection Radar',
+    0x35: 'Radar-1Hr',
+    0x37: 'Canada Radar',
+    0x38: 'Coverage (Alt)',
+    0x3C: 'OEM Product 0x3C',
+    0x3D: 'OEM Product 0x3D',
+    0x3E: 'OEM Product 0x3E',
+    0x3F: 'OEM Product 0x3F',
+    0x42: 'OEM Product 66',
+    0x45: 'OEM Product 0x45',
+    0x46: 'OEM Product 0x46',
+    0x47: 'OEM Product 0x47',
+    0x48: 'Weather Product 0x48',
+    0x4C: 'OEM Product 76',
+    0x5A: 'Canadian METAR',
+    0x5B: 'Canadian TAF',
+    0x5C: 'Generic Grid 0x5C',
+    0x5D: 'Generic Grid 0x5D',
+    0x5E: 'Generic Grid 0x5E',
+    0x60: 'Generic Grid 0x60',
+    0x61: 'Generic Grid 0x61',
+    0x62: 'Generic Grid 0x62',
+    0x67: 'TAF30',
+    0x68: 'HiRes SST Tile',
   };
 
   XmAppProcessor(this.sxiLayer);
@@ -110,7 +83,7 @@ class XmAppProcessor {
   void processXmAppPacket(int dmi, DataServiceIdentifier dsi, List<int> bytes,
       int lenMsb, int lenLsb) {
     final int packetLength = ((lenMsb << 8) | lenLsb) & 0xFFFF;
-    final String dmiName = _dmiNames[dmi] ?? 'Unknown';
+    final String dmiName = _dmiLabel(dmi, dsi);
     final String dmiHex = _hexId(dmi);
 
     if (bytes.isEmpty) {
@@ -124,9 +97,8 @@ class XmAppProcessor {
           'XMApp packet length mismatch for DMI: $dmiHex ($dmiName), DSI: $dsi expected $packetLength got ${bytes.length}');
     }
 
-    if (_dmiNames.containsKey(dmi)) {
-      logger.d('XMApp DMI recognized: $dmiHex ($dmiName) DSI: $dsi');
-    } else {
+    if (dsi == DataServiceIdentifier.none ||
+        DataServiceIdentifier.xmAppDsiForAppId(dmi) == null) {
       logger.t('XMApp DMI unknown: $dmiHex DSI: $dsi');
     }
 
@@ -137,15 +109,11 @@ class XmAppProcessor {
       final int appId = bytes[2];
       final int frame = bytes[3];
       final int innerLen = bytes[7];
-      final int service = (bytes[8] << 8) | bytes[9];
       final int safeInnerLen =
           (12 + innerLen <= bytes.length) ? innerLen : (bytes.length - 12);
       final List<int> innerChunk = bytes.sublist(12, 12 + safeInnerLen);
       final int providedCrc = (bytes[10] << 8) | bytes[11];
-      final int calculatedCrc = _crc16(innerChunk);
-
-      logger.d(
-          'XMApp frame DSI: $dsi DMI: $dmiHex ($dmiName) appId: ${_hexId(appId)} frame: ${_hexId(frame)} service: ${_hexId(service)} innerLen: $innerLen safeInnerLen: $safeInnerLen');
+      final int calculatedCrc = CRC16.calculate(innerChunk);
 
       if (providedCrc != calculatedCrc) {
         logger.t(
@@ -171,81 +139,92 @@ class XmAppProcessor {
     for (int byte in chunk) {
       int b = byte & 0xFF;
 
-      if (!state.inSync) {
-        if (b == 0xAB) {
-          state.resetMessageOnly();
-          state.inSync = true;
-        }
-        continue;
-      }
-
-      if (state.expectingEscapeCode) {
+      if (state.pendingEscapedTailCode) {
+        state.pendingEscapedTailCode = false;
         if (b <= 1) {
-          // Mapping: 0 -> 0xCC, 1 -> 0xCD
-          b = 0xCC + b;
-          state.expectingEscapeCode = false;
+          _consumeDecodedXmByte(streamKey, dsi, state, 0xAB);
+          _consumeDecodedXmByte(streamKey, dsi, state, 0xCC + b);
         } else {
           logger.t(
               'XMApp stream $streamKey invalid escape code: 0x${b.toRadixString(16)}');
           state.resetAll();
+        }
+        continue;
+      }
+
+      if (state.pendingAbControl) {
+        state.pendingAbControl = false;
+        if (b == 0xCD) {
+          // Start of a new framed message
+          state.resetMessageOnly();
+          state.synced = true;
           continue;
         }
-      } else if (b == 0xCC) {
-        state.expectingEscapeCode = true;
+        if (b == 0xCC) {
+          state.pendingEscapedTailCode = true;
+          continue;
+        }
+        // Payload data
+        _consumeDecodedXmByte(streamKey, dsi, state, 0xAB);
+        _consumeDecodedXmByte(streamKey, dsi, state, b);
         continue;
       }
 
-      if (state.expectedLength == null) {
-        state.lengthBytes.add(b);
+      if (b == 0xAB) {
+        state.pendingAbControl = true;
+        continue;
+      }
 
-        if (state.lengthBytes.length == 2) {
-          final int len16 = (state.lengthBytes[0] << 8) | state.lengthBytes[1];
-          if (len16 != 0xFFFF) {
-            if (len16 == 0 || len16 > 0x61A80) {
-              logger
-                  .t('XMApp stream $streamKey invalid message length: $len16');
-              state.resetAll();
-            } else {
-              state.expectedLength = len16;
-            }
-          }
-        } else if (state.lengthBytes.length == 6) {
-          if (state.lengthBytes[0] != 0xFF || state.lengthBytes[1] != 0xFF) {
-            logger.t('XMApp stream $streamKey invalid extended length header');
-            state.resetAll();
-            continue;
-          }
-          final int len32 = (state.lengthBytes[2] << 24) |
-              (state.lengthBytes[3] << 16) |
-              (state.lengthBytes[4] << 8) |
-              state.lengthBytes[5];
-          if (len32 == 0 || len32 > 0x61A80) {
-            logger.t(
-                'XMApp stream $streamKey invalid extended message length: $len32');
+      _consumeDecodedXmByte(streamKey, dsi, state, b);
+    }
+  }
+
+  void _consumeDecodedXmByte(String streamKey, DataServiceIdentifier dsi,
+      _XmAppStreamState state, int b) {
+    if (!state.synced) {
+      return;
+    }
+
+    if (state.expectedLength == null) {
+      state.lengthBytes.add(b);
+
+      if (state.lengthBytes.length == 2) {
+        // Parser treats framed lengths as little-endian.
+        final int len16 = state.lengthBytes[0] | (state.lengthBytes[1] << 8);
+        if (len16 != 0xFFFF) {
+          if (len16 == 0 || len16 > 0x61A80) {
+            logger.t('XMApp stream $streamKey invalid message length: $len16');
             state.resetAll();
           } else {
-            state.expectedLength = len32;
+            state.expectedLength = len16;
           }
         }
-        continue;
-      }
-
-      state.messageBytes.add(b);
-      final int expectedLength = state.expectedLength!;
-      if (state.messageBytes.length < expectedLength) {
-        final int progressBucket =
-            ((state.messageBytes.length * 100) ~/ expectedLength) ~/ 10;
-        if (progressBucket > state.lastLoggedProgressBucket) {
-          state.lastLoggedProgressBucket = progressBucket;
-          logger.d(
-              'XMApp stream $streamKey message progress: ${progressBucket * 10}% (${state.messageBytes.length}/$expectedLength)');
+      } else if (state.lengthBytes.length == 6) {
+        if (state.lengthBytes[0] != 0xFF || state.lengthBytes[1] != 0xFF) {
+          logger.t('XMApp stream $streamKey invalid extended length header');
+          state.resetAll();
+          return;
+        }
+        final int len32 = state.lengthBytes[2] |
+            (state.lengthBytes[3] << 8) |
+            (state.lengthBytes[4] << 16) |
+            (state.lengthBytes[5] << 24);
+        if (len32 == 0 || len32 > 0x61A80) {
+          logger.t(
+              'XMApp stream $streamKey invalid extended message length: $len32');
+          state.resetAll();
+        } else {
+          state.expectedLength = len32;
         }
       }
+      return;
+    }
 
-      if (state.messageBytes.length == expectedLength) {
-        _handleCompleteXmMessage(streamKey, dsi, state.messageBytes);
-        state.resetAll();
-      }
+    state.messageBytes.add(b);
+    if (state.messageBytes.length == state.expectedLength) {
+      _handleCompleteXmMessage(streamKey, dsi, state.messageBytes);
+      // Returns to unsynced state and waits for next 0xAB 0xCD marker
+      state.resetAll();
     }
   }
 
@@ -255,87 +234,193 @@ class XmAppProcessor {
     final int productId = message[0];
     final String productName = _productNames[productId] ?? 'Unknown';
     final int dmi = int.tryParse(streamKey.split(':').first) ?? -1;
-    final String dmiName = _dmiNames[dmi] ?? 'Unknown';
-    logger.d(
-        'XMApp message complete DSI: $dsi DMI: ${_hexId(dmi)} ($dmiName) stream: $streamKey productId: ${_hexId(productId)} ($productName) len: ${message.length} preview: ${_hexPreview(message)}');
+    final String dmiName = _dmiLabel(dmi, dsi);
 
     if (_isRadarProduct(productId)) {
       logger.i(
-          'XMApp radar product received dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) len=${message.length}');
-    } else if (_isAviationTextProduct(productId)) {
-      logger.i(
-          'XMApp aviation text product received dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) len=${message.length}');
-    } else if (_productNames.containsKey(productId)) {
-      logger.i(
-          'XMApp known product received dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) len=${message.length}');
+          'XMApp radar product dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) len=${message.length}');
+      unawaited(_handleRadarProduct(
+        streamKey: streamKey,
+        dmi: dmi,
+        dmiName: dmiName,
+        productId: productId,
+        productName: productName,
+        message: List<int>.from(message),
+      ));
+      return;
+    }
+
+    if (_productNames.containsKey(productId)) {
+      logger.d(
+          'XMApp ${_productFamily(productId)} product dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) len=${message.length}');
     } else {
       logger.t(
           'XMApp unknown product dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} len=${message.length}');
     }
-
-    if (_isWeatherDmi(dmi)) {
-      logger.d(
-          'XMApp weather DMI payload observed: dmi=${_hexId(dmi)} ($dmiName), product=${_hexId(productId)} ($productName)');
-    }
   }
 
-  int _crc16(List<int> data) {
-    int crc = 0xFFFF;
-    for (final int byte in data) {
-      crc ^= ((byte & 0xFF) << 8);
-      for (int i = 0; i < 8; i++) {
-        if ((crc & 0x8000) != 0) {
-          crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
-        } else {
-          crc = (crc << 1) & 0xFFFF;
-        }
-      }
+  Future<void> _handleRadarProduct({
+    required String streamKey,
+    required int dmi,
+    required String dmiName,
+    required int productId,
+    required String productName,
+    required List<int> message,
+  }) async {
+    final XmRadarDecodeResult? result =
+        await XmRadarDecoder.decodeAsync(message);
+    if (result == null) {
+      logger.w(
+          'XMApp radar packet rejected dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) len=${message.length}');
+      return;
     }
-    return crc ^ 0xFFFF;
+
+    if (result.overlay == null) {
+      final String issueKey =
+          '$streamKey:$productId:${result.packet.timestampUtc.millisecondsSinceEpoch}:${result.error}';
+      if (_reportedRadarDecodeIssues.add(issueKey)) {
+        if (_reportedRadarDecodeIssues.length > 128) {
+          _reportedRadarDecodeIssues.remove(_reportedRadarDecodeIssues.first);
+        }
+        logger.d(
+            'XMApp radar decode failed dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) '
+            'mode=${_hexId(result.packet.mode)} reason=${result.error}');
+      }
+      return;
+    }
+
+    final String frameKey =
+        '$streamKey:$productId:${result.packet.timestampUtc.millisecondsSinceEpoch}:'
+        '${result.packet.centerLatDeg.toStringAsFixed(6)}:${result.packet.centerLonDeg.toStringAsFixed(6)}:'
+        '${result.packet.spanLonDeg.toStringAsFixed(6)}:${result.packet.width}x${result.packet.height}';
+    if (!_seenRadarFrames.add(frameKey)) {
+      return;
+    }
+    if (_seenRadarFrames.length > 128) {
+      _seenRadarFrames.remove(_seenRadarFrames.first);
+    }
+
+    sxiLayer.appState
+        .addRadarOverlay(result.overlay!, result.packet.timestampUtc);
+    logger.i(
+        'XMApp radar overlay added dmi=${_hexId(dmi)} ($dmiName) id=${_hexId(productId)} ($productName) '
+        'center=[${result.packet.centerLatDeg.toStringAsFixed(6)},${result.packet.centerLonDeg.toStringAsFixed(6)}] '
+        'spanLon=${result.packet.spanLonDeg.toStringAsFixed(6)} '
+        'ts=${result.packet.timestampUtc.toIso8601String()} '
+        'size=${result.packet.width}x${result.packet.height}');
   }
 
   bool _isRadarProduct(int productId) =>
-      productId == 0x01 || productId == 0x33 || productId == 0x34;
+      productId == 0x01 ||
+      productId == 0x1D ||
+      productId == 0x33 ||
+      productId == 0x34 ||
+      productId == 0x35 ||
+      productId == 0x37;
 
-  bool _isAviationTextProduct(int productId) =>
-      productId >= 0x0D && productId <= 0x13;
-
-  String _hexPreview(List<int> bytes, {int maxLen = 24}) {
-    final int take = bytes.length < maxLen ? bytes.length : maxLen;
-    final String preview = bytes
-        .take(take)
-        .map((int b) => b.toRadixString(16).padLeft(2, '0'))
-        .join(' ');
-    if (bytes.length > maxLen) {
-      return '$preview ...';
+  String _productFamily(int productId) {
+    if (_isRadarProduct(productId)) return 'radar';
+    switch (productId) {
+      case 0x05:
+      case 0x11:
+      case 0x1B:
+      case 0x1C:
+      case 0x1F:
+      case 0x23:
+      case 0x24:
+      case 0x25:
+      case 0x2A:
+      case 0x42:
+      case 0x4C:
+      case 0x5A:
+      case 0x5B:
+      case 0x67:
+        return 'text';
+      case 0x02:
+      case 0x03:
+      case 0x04:
+      case 0x06:
+      case 0x07:
+      case 0x08:
+      case 0x09:
+      case 0x0B:
+      case 0x0C:
+      case 0x0D:
+      case 0x0E:
+      case 0x0F:
+      case 0x10:
+      case 0x12:
+      case 0x13:
+      case 0x14:
+      case 0x15:
+      case 0x17:
+      case 0x18:
+      case 0x19:
+      case 0x22:
+      case 0x26:
+      case 0x27:
+      case 0x28:
+      case 0x32:
+      case 0x38:
+      case 0x5C:
+      case 0x5D:
+      case 0x5E:
+      case 0x60:
+      case 0x61:
+      case 0x62:
+      case 0x68:
+        return 'grid';
+      case 0x2F:
+      case 0x30:
+      case 0x31:
+        return 'raw';
+      case 0x3C:
+      case 0x3D:
+      case 0x3E:
+      case 0x3F:
+      case 0x45:
+      case 0x46:
+      case 0x47:
+      case 0x48:
+        return 'oem';
+      default:
+        return _productNames.containsKey(productId) ? 'known' : 'unknown';
     }
-    return preview;
   }
 
-  bool _isWeatherDmi(int dmi) =>
-      dmi == 0x0A || dmi == 0x0E || (dmi >= 0xE6 && dmi <= 0xEE);
+  String _dmiLabel(int dmi, DataServiceIdentifier dsi) {
+    if (dsi != DataServiceIdentifier.none) {
+      return dsi.name;
+    }
+    final DataServiceIdentifier? mapped =
+        DataServiceIdentifier.xmAppDsiForAppId(dmi);
+    if (mapped != null) {
+      return mapped.name;
+    }
+    return 'unknown';
+  }
 
   String _hexId(int value) => '0x${value.toRadixString(16).padLeft(2, '0')}';
 }
 
 class _XmAppStreamState {
-  bool inSync = false;
-  bool expectingEscapeCode = false;
+  bool synced = false;
+  bool pendingAbControl = false;
+  bool pendingEscapedTailCode = false;
   final List<int> lengthBytes = <int>[];
   int? expectedLength;
   final List<int> messageBytes = <int>[];
-  int lastLoggedProgressBucket = -1;
 
   void resetMessageOnly() {
-    expectingEscapeCode = false;
     lengthBytes.clear();
     expectedLength = null;
     messageBytes.clear();
-    lastLoggedProgressBucket = -1;
   }
 
   void resetAll() {
-    inSync = false;
+    synced = false;
+    pendingAbControl = false;
+    pendingEscapedTailCode = false;
     resetMessageOnly();
   }
 }

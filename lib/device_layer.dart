@@ -107,6 +107,11 @@ class DeviceLayer {
           _sxiLayer.appState.updateRadioId(radioId),
       updateChannelData: (int sid, String artist, String song, int programId) =>
           _sxiLayer.appState.updateChannelData(sid, artist, song, programId),
+      shouldBootstrapXmWeather: () => _sxiLayer.appState.monitoredDataServices
+          .any(XmProtocolAdapter.isXmWeatherDataService),
+      xmStartupBaudCandidates: XmProtocolAdapter.candidateBaudsForSavedBaud(
+        _sxiLayer.appState.secondaryBaudRate,
+      ),
     );
   }
 
