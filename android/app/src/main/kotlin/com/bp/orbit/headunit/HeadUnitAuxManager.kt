@@ -15,6 +15,8 @@ object HeadUnitAuxManager {
     TopwayTwUtilAux,
     // JanCar / Autochips / Mediatek
     JancarAutochipsAux,
+    // Choiceway
+    ChoicewayAux,
     // QF / MCU channel switch
     QfMcuAux,
     // Junsun V1

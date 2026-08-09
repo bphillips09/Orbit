@@ -71,5 +71,7 @@
         <!-- Microntek / MTC Aux-in support -->
         <package android:name="android.microntek.service" />
         <package android:name="com.microntek.avin" />
+        <!-- Choiceway Aux-in support -->
+        <package android:name="com.szchoiceway.eventcenter" />
     </queries>
 </manifest>
