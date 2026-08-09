@@ -9,9 +9,6 @@ on:
 permissions:
   contents: write
 
-env:
-  FLUTTER_VERSION: "3.38.9"
-
 jobs:
   build_android:
     name: Build Android
@@ -19,6 +16,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Read Flutter version
+        id: fvm
+        shell: bash
+        run: |
+          VERSION="$(python3 -c "import json; print(json.load(open('.fvmrc'))['flutter'])")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -29,7 +33,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: ${{ steps.fvm.outputs.version }}
           cache: true
 
       - name: Install dependencies
@@ -70,10 +74,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Read Flutter version
+        id: fvm
+        shell: bash
+        run: |
+          VERSION="$(python3 -c "import json; print(json.load(open('.fvmrc'))['flutter'])")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: ${{ steps.fvm.outputs.version }}
           cache: true
 
       - name: Install macOS build tools
@@ -125,10 +136,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Read Flutter version
+        id: fvm
+        shell: bash
+        run: |
+          VERSION="$(python3 -c "import json; print(json.load(open('.fvmrc'))['flutter'])")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: ${{ steps.fvm.outputs.version }}
           cache: true
 
       - name: Enable Windows long paths

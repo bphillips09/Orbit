@@ -10,9 +10,6 @@ concurrency:
   group: gh-pages
   cancel-in-progress: true
 
-env:
-  FLUTTER_VERSION: "3.38.9"
-
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
@@ -20,10 +17,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Read Flutter version
+        id: fvm
+        shell: bash
+        run: |
+          VERSION="$(python3 -c "import json; print(json.load(open('.fvmrc'))['flutter'])")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: ${{ steps.fvm.outputs.version }}
           cache: true
 
       - name: Install dependencies
