@@ -1365,7 +1365,7 @@ class MainPageState extends State<MainPage>
 
       // Only switch if the user enabled "switch to aux on focus gain".
       if (appState.switchToAuxOnFocusGain) {
-        unawaited(HeadUnitAux.trySwitchToAux());
+        unawaited(_ensureNativeAuxSelected());
       }
     }
   }
@@ -1490,16 +1490,6 @@ class MainPageState extends State<MainPage>
     if (defaultTargetPlatform != TargetPlatform.android ||
         !HeadUnitAux.isAvailable ||
         !appState.useNativeAuxInput) {
-      return;
-    }
-
-    if (state == AppLifecycleState.resumed) {
-      // Switch head unit to aux when resuming
-      if (!appState.switchToAuxOnFocusGain) return;
-      final bool isPlaying = appState.playbackState == AppPlaybackState.live ||
-          appState.playbackState == AppPlaybackState.recordedContent;
-      if (!isPlaying && !appState.audioPresence) return;
-      unawaited(HeadUnitAux.trySwitchToAux());
       return;
     }
 
@@ -1653,9 +1643,7 @@ class MainPageState extends State<MainPage>
 
     _auxEnsureInProgress = true;
     try {
-      final status = await HeadUnitAux.tryIsCurrentInputAux(timeoutMs: 450);
-      if (status.isAux) return;
-      unawaited(HeadUnitAux.trySwitchToAux(timeoutMs: 1500));
+      await HeadUnitAux.trySwitchToAux(timeoutMs: 1500, probeTimeoutMs: 450);
     } finally {
       _auxEnsureInProgress = false;
     }

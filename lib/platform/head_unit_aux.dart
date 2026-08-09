@@ -71,12 +71,19 @@ class HeadUnitAux {
     return error.toString();
   }
 
-  // Wrapper that logs and returns (opened, errorMessage)
+  // Probe current source then switch if needed
   static Future<({bool opened, String? errorMessage})> trySwitchToAux(
-      {int timeoutMs = 1500}) async {
+      {int timeoutMs = 1500, int probeTimeoutMs = 450}) async {
     if (!isAvailable) {
       return (opened: false, errorMessage: 'Not supported on this platform.');
     }
+
+    final status = await tryIsCurrentInputAux(timeoutMs: probeTimeoutMs);
+    if (status.errorMessage == null && status.isAux) {
+      logger.d('HeadUnitAux: already on aux');
+      return (opened: true, errorMessage: null);
+    }
+
     try {
       final opened = await switchToAux(timeoutMs: timeoutMs);
       if (opened) {
