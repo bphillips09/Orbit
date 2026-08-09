@@ -37,7 +37,6 @@ import 'package:orbit/update_checker.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:orbit/ui/unsupported_browser_app.dart';
 import 'package:orbit/ui/favorite_dialog.dart';
-import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/small_screen_mode_confirm_dialog.dart';
 import 'package:orbit/ui/welcome_dialog.dart';
 import 'package:orbit/ui/connection_dialogs.dart';
@@ -1673,16 +1672,21 @@ class MainPageState extends State<MainPage>
   }
 
   // Show the EPG dialog
-  Future<int> _showSelectChannelFromEPG({int? initialCategory}) async {
+  Future<int> showProgramGuide({
+    int? initialCategory,
+    bool favoritesOnAir = false,
+    BuildContext? dialogContext,
+  }) async {
     try {
       deviceLayer.requestGuideWalkIfStale();
     } catch (_) {}
     return await EpgDialogHelper.showEpgDialog(
-      context: context,
+      context: dialogContext ?? context,
       appState: appState,
       sxiLayer: sxiLayer,
       deviceLayer: deviceLayer,
       initialCategory: initialCategory,
+      initialFavoritesOnAir: favoritesOnAir,
       mainScrollController: mainScrollController,
       mainListController: mainListController,
       categoryScrollController: categoryScrollController,
@@ -1984,11 +1988,7 @@ class MainPageState extends State<MainPage>
             _lastOnAirPromptAt = null;
           });
 
-          FavoritesOnAirDialogHelper.show(
-            context: context,
-            appState: appState,
-            deviceLayer: deviceLayer,
-          );
+          unawaited(showProgramGuide(favoritesOnAir: true));
         },
         icon: Icon(Icons.favorite, color: colorScheme.primary),
         label: Text(
@@ -2107,7 +2107,7 @@ class MainPageState extends State<MainPage>
                       onPressed: appState.updatingChannels
                           ? null
                           : () {
-                              _showSelectChannelFromEPG();
+                              showProgramGuide();
                             },
                     ),
                     if (!appState.isXmTuner)
@@ -2330,7 +2330,7 @@ class MainPageState extends State<MainPage>
                                               children: [
                                                 TextButton(
                                                   onPressed: () {
-                                                    _showSelectChannelFromEPG(
+                                                    showProgramGuide(
                                                       initialCategory: appState
                                                           .currentCategory,
                                                     );
@@ -2529,7 +2529,7 @@ class MainPageState extends State<MainPage>
                             // Current Channel Category
                             TextButton(
                               onPressed: () {
-                                _showSelectChannelFromEPG(
+                                showProgramGuide(
                                   initialCategory: appState.currentCategory,
                                 );
                               },
@@ -2698,9 +2698,10 @@ class MainPageState extends State<MainPage>
               Positioned.fill(
                 child: Stack(
                   children: [
-                    const ModalBarrier(
-                      dismissible: false,
+                    ModalBarrier(
+                      dismissible: kDebugMode,
                       color: Colors.black54,
+                      onDismiss: kDebugMode ? _hideStartupGate : null,
                     ),
                     Center(
                       child: ConstrainedBox(
@@ -2735,6 +2736,13 @@ class MainPageState extends State<MainPage>
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.end,
                                   children: [
+                                    if (kDebugMode) ...[
+                                      TextButton(
+                                        onPressed: _hideStartupGate,
+                                        child: const Text('Hide'),
+                                      ),
+                                      const SizedBox(width: 8),
+                                    ],
                                     OutlinedButton.icon(
                                       onPressed: _openSettings,
                                       icon: const Icon(Icons.settings),
@@ -2912,7 +2920,7 @@ class MainPageState extends State<MainPage>
                     onPressed: appState.updatingChannels
                         ? null
                         : () {
-                            _showSelectChannelFromEPG();
+                            showProgramGuide();
                           },
                     icon: const Icon(Icons.view_list),
                     label: const Text('Guide'),
@@ -3029,7 +3037,7 @@ class MainPageState extends State<MainPage>
                   onPressed: appState.updatingChannels
                       ? null
                       : () {
-                          _showSelectChannelFromEPG();
+                          showProgramGuide();
                         },
                   icon: const Icon(Icons.view_list),
                   label: const Text('Guide'),

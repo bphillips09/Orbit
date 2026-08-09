@@ -26,7 +26,6 @@ import 'package:orbit/ui/presets_editor.dart';
 import 'package:orbit/ui/favorites_manager.dart';
 import 'package:orbit/ui/log_viewer.dart';
 import 'package:orbit/ui/log_level_picker.dart';
-import 'package:orbit/ui/favorites_on_air_dialog.dart';
 import 'package:orbit/ui/signal_bar.dart';
 import 'package:orbit/ui/streaming_beta.dart';
 import 'package:orbit/ui/channel_logo_image.dart';
@@ -139,12 +138,9 @@ class SettingsPage extends StatelessWidget {
                   'View and tune to on-air favorites',
                   Icons.play_circle_outline,
                   onTap: () async {
-                    final appState =
-                        Provider.of<AppState>(context, listen: false);
-                    await FavoritesOnAirDialogHelper.show(
-                      context: context,
-                      appState: appState,
-                      deviceLayer: mainPage.deviceLayer,
+                    await mainPage.showProgramGuide(
+                      favoritesOnAir: true,
+                      dialogContext: context,
                     );
                   },
                 ),
