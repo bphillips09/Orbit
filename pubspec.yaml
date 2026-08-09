@@ -10,26 +10,26 @@ dependencies:
   flutter:
     sdk: flutter
   #ui
-  cupertino_icons: ^1.0.8
+  cupertino_icons: ^1.0.9
   image: ^4.8.0
   web: ^1.1.1
   carousel_slider: ^5.1.2
   super_sliver_list: ^0.4.1
-  scaled_app: ^2.3.0
+  scaled_app: ^2.3.1
   flutter_auto_size_text: ^5.0.0
-  window_manager: ^0.5.1 #desktop only
+  window_manager: ^0.5.2 #desktop only
   #data
   path: ^1.9.1
   provider: ^6.1.5+1
-  path_provider: ^2.1.5
-  sembast: ^3.8.6
-  sembast_web: ^2.4.4+1
-  drift: ^2.32.1
-  drift_flutter: ^0.3.0
+  path_provider: ^2.1.6
+  sembast: ^3.8.9+1
+  sembast_web: ^2.4.5+1
+  drift: ^2.34.3
+  drift_flutter: ^0.3.1
   #file operations
-  open_file: ^3.5.11
-  android_intent_plus: ^5.3.1
-  file_picker: ^10.3.10
+  open_file: ^4.0.0
+  android_intent_plus: ^6.1.0
+  file_picker: ^12.0.0-beta.7
   universal_io: ^2.3.1
   #serial
   serial: ^0.0.7+1
@@ -37,50 +37,41 @@ dependencies:
   flutter_libserialport: ^0.6.0
   #audio
   mp_audio_stream: ^0.2.2
-  record: ^6.2.0
-  permission_handler: ^12.0.1
+  record: ^7.1.1
+  flutter_foreground_task: ^10.0.0
+  permission_handler: ^13.0.0
   flutter_inappwebview: ^6.2.0-beta.3
   #audio control
-  audio_service: ^0.18.18
-  audio_session: ^0.2.3
+  audio_service: ^0.18.19
+  audio_session: ^0.2.4
   #logging
   logger: ^2.7.0
   #versioning
   version: ^3.0.2
-  package_info_plus: ^9.0.0
-  device_info_plus: ^12.3.0
+  package_info_plus: ^10.2.1
+  device_info_plus: ^13.2.0
   url_launcher: ^6.3.2
   #analytics
   http: ^1.6.0
-  aptabase_flutter: ^0.4.1
+  aptabase_flutter: ^0.5.0
   #weather
-  flutter_map: ^8.2.2
-  latlong2: ^0.9.1
+  flutter_map: ^8.3.1
+  latlong2: ^0.10.1
   archive: ^4.0.9
-
-dependency_overrides:
-  #fix for stereo capture on macOS
-  record_macos:
-    git:
-      url: https://github.com/bphillips09/record.git
-      path: record_macos
-      ref: sync/upstream-macos-stereo-fix
-  package_info_plus: ^8.3.1
-  device_info_plus: ^11.5.0
-  universal_io: ^2.3.1
-  shared_preferences: ^2.5.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   build_runner: ^2.13.1
-  drift_dev: ^2.32.1
+  drift_dev: ^2.34.5
   package_rename: ^1.10.1
   flutter_launcher_icons: ^0.14.4
   peanut: ^6.0.1
 
 flutter:
+  config:
+    enable-swift-package-manager: false
   uses-material-design: true
   assets:
     - assets/icon/icon.png
