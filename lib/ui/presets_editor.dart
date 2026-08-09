@@ -166,9 +166,8 @@ class _PresetsEditorDialogState extends State<PresetsEditorDialog> {
                 child: ReorderableListView.builder(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: _workingPresets.length,
-                  onReorder: (oldIndex, newIndex) {
+                  onReorderItem: (oldIndex, newIndex) {
                     setState(() {
-                      if (newIndex > oldIndex) newIndex -= 1;
                       final item = _workingPresets.removeAt(oldIndex);
                       _workingPresets.insert(newIndex, item);
                     });

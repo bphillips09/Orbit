@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:mp_audio_stream/mp_audio_stream.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
+import 'package:orbit/audio/android_audio_foreground.dart';
 import 'package:orbit/logging.dart';
 
 class AudioController {
@@ -498,6 +499,11 @@ class AudioController {
     }
 
     final int sr = effectiveSampleRate ?? sampleRate;
+    try {
+      await AndroidAudioForeground.start();
+    } catch (e) {
+      logger.w('Android audio foreground service unavailable: $e');
+    }
     final recordStream = await record.startStream(RecordConfig(
       encoder: AudioEncoder.pcm16bits,
       sampleRate: sr,
@@ -505,10 +511,6 @@ class AudioController {
       androidConfig: const AndroidRecordConfig(
         manageBluetooth: false,
         audioSource: AndroidAudioSource.unprocessed,
-        service: AndroidService(
-          title: 'Orbit',
-          content: 'Processing audio input...',
-        ),
       ),
       audioInterruption: AudioInterruptionMode.none,
       device: device,
@@ -556,6 +558,10 @@ class AudioController {
       }
     } catch (_) {}
     _recordStreamStarted = false;
+
+    try {
+      await AndroidAudioForeground.stop();
+    } catch (_) {}
 
     try {
       await _recorder?.dispose();

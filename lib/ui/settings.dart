@@ -2284,7 +2284,7 @@ class SettingsPage extends StatelessWidget {
         return;
       }
 
-      final savePath = await FilePicker.platform.saveFile(
+      final savePath = await FilePicker.saveFile(
         dialogTitle: 'Export Orbit ${_configKindLabel(kind)}',
         fileName: datedFileName,
         type: FileType.custom,
@@ -2323,24 +2323,14 @@ class SettingsPage extends StatelessWidget {
     required _ConfigDataKind kind,
   }) async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final PlatformFile? picked = await FilePicker.pickFile(
         dialogTitle: 'Import Orbit ${_configKindLabel(kind)}',
         type: FileType.custom,
         allowedExtensions: const ['orbit'],
-        withData: kIsWeb || kIsWasm || Platform.isAndroid,
       );
-      if (result == null || result.files.isEmpty) return;
+      if (picked == null) return;
 
-      final picked = result.files.single;
-      Uint8List? bytes = picked.bytes;
-      if (bytes == null) {
-        final path = picked.path;
-        if (path == null || path.trim().isEmpty) {
-          throw StateError('Selected file could not be read.');
-        }
-        bytes = await File(path).readAsBytes();
-      }
-
+      final Uint8List bytes = await picked.readAsBytes();
       if (bytes.isEmpty) {
         throw StateError('Failed to read file bytes.');
       }
@@ -2381,13 +2371,13 @@ class SettingsPage extends StatelessWidget {
         () async {
           if (kind == _ConfigDataKind.saveData) {
             await OrbitConfigTransfer.importSaveDataBytes(
-              bytes: bytes!,
+              bytes: bytes,
               storageData: appState.storageData,
             );
             return;
           }
           await OrbitConfigTransfer.importImageDataBytes(
-            bytes: bytes!,
+            bytes: bytes,
             storageData: appState.storageData,
           );
         },

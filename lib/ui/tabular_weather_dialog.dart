@@ -7,7 +7,6 @@ import 'package:orbit/data/weather/tabular_weather_state.dart';
 import 'package:orbit/data/weather/tabular_weather_event_codes.dart';
 import 'package:orbit/data/weather/tabular_weather_location.dart';
 import 'package:orbit/platform/download_bytes.dart';
-import 'package:universal_io/io.dart';
 
 class TabularWeatherDialog extends StatefulWidget {
   final TabularWeatherState tabularWeatherState;
@@ -47,7 +46,7 @@ class _TabularWeatherDialogState extends State<TabularWeatherDialog> {
       return;
     }
 
-    final String? savePath = await FilePicker.platform.saveFile(
+    final String? savePath = await FilePicker.saveFile(
       dialogTitle: 'Save database',
       fileName: suggestedName,
       type: FileType.custom,
@@ -65,21 +64,13 @@ class _TabularWeatherDialogState extends State<TabularWeatherDialog> {
   }
 
   Future<void> _loadDbFromFile(BuildContext context) async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
+    final PlatformFile? f = await FilePicker.pickFile(
       type: FileType.custom,
       allowedExtensions: const ['bin'],
-      withData: kIsWeb || Platform.isAndroid,
     );
-    if (result == null || result.files.isEmpty) return;
-    final PlatformFile f = result.files.first;
+    if (f == null) return;
 
-    Uint8List? bytes = f.bytes;
-    if (bytes == null) {
-      final String? path = f.path;
-      if (path == null || path.isEmpty) return;
-      bytes = await File(path).readAsBytes();
-    }
+    final Uint8List bytes = await f.readAsBytes();
     if (bytes.isEmpty) return;
 
     widget.tabularWeatherState
