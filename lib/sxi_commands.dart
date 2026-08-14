@@ -584,67 +584,70 @@ class SXiDebugCommand extends SXiPayload {
   final int b0;
   final int b1;
   final int b2;
-  final int b3;
 
-  SXiDebugCommand({int b0 = 0, int b1 = 0, int b2 = 0, int b3 = 0})
+  SXiDebugCommand({int b0 = 0, int b1 = 0, int b2 = 0})
       : b0 = b0 & 0xFF,
         b1 = b1 & 0xFF,
         b2 = b2 & 0xFF,
-        b3 = b3 & 0xFF,
         super(0x0F, 0x09, 0);
 
   @override
   List<int> getParameters() {
-    return [b0, b1, b2, b3];
+    return [b0, b1, b2];
   }
 }
 
 class SXiDebugResetCommand extends SXiPayload {
-  SXiDebugResetCommand() : super(0x0F, 0x00, 0);
+  final int param;
+
+  SXiDebugResetCommand({int param = 0})
+      : param = param & 0xFF,
+        super(0x0F, 0x00, 0);
 
   @override
   List<int> getParameters() {
-    return [0x00, 0x00];
+    return [param];
   }
 }
 
 class SXiDebugMonitorCommand extends SXiPayload {
+  final int mode;
   final int bank;
-  final int widthType;
   final int address;
   final int length;
-  final int flags;
+  final int widthType;
   final int extra;
 
   SXiDebugMonitorCommand({
+    this.mode = 0,
     required this.bank,
-    required this.widthType,
     required this.address,
     required this.length,
-    this.flags = 0,
+    required this.widthType,
     this.extra = 0,
   }) : super(0x0F, 0x04, 0);
 
   SXiDebugMonitorCommand.readByte(int address, {int bank = 0})
       : this(
+          mode: 0,
           bank: bank,
-          widthType: 0,
           address: address,
           length: 1,
+          widthType: 0,
         );
 
   @override
   List<int> getParameters() {
     return [
+      mode & 0xFF,
       bank & 0xFF,
-      widthType & 0xFF,
       (address >> 24) & 0xFF,
       (address >> 16) & 0xFF,
       (address >> 8) & 0xFF,
       address & 0xFF,
       (length >> 8) & 0xFF,
       length & 0xFF,
-      flags & 0xFF,
+      widthType & 0xFF,
       (extra >> 8) & 0xFF,
       extra & 0xFF,
     ];
@@ -670,14 +673,13 @@ class SXiDebugWriteBytesCommand extends SXiPayload {
     final int length = data.length & 0xFFFF;
     return [
       bank & 0xFF,
-      _widthType & 0xFF,
       (address >> 24) & 0xFF,
       (address >> 16) & 0xFF,
       (address >> 8) & 0xFF,
       address & 0xFF,
       (length >> 8) & 0xFF,
       length & 0xFF,
-      _widthType & 0xFF,
+      _widthType,
       ...data,
     ];
   }
@@ -707,14 +709,13 @@ class SXiDebugWriteWordsCommand extends SXiPayload {
     }
     return [
       bank & 0xFF,
-      _widthType & 0xFF,
       (address >> 24) & 0xFF,
       (address >> 16) & 0xFF,
       (address >> 8) & 0xFF,
       address & 0xFF,
       (length >> 8) & 0xFF,
       length & 0xFF,
-      _widthType & 0xFF,
+      _widthType,
       ...encoded,
     ];
   }
@@ -746,33 +747,29 @@ class SXiDebugWriteDWordsCommand extends SXiPayload {
     }
     return [
       bank & 0xFF,
-      _widthType & 0xFF,
       (address >> 24) & 0xFF,
       (address >> 16) & 0xFF,
       (address >> 8) & 0xFF,
       address & 0xFF,
       (length >> 8) & 0xFF,
       length & 0xFF,
-      _widthType & 0xFF,
+      _widthType,
       ...encoded,
     ];
   }
 }
 
 class SXiDebugTunnelCommand extends SXiPayload {
-  final int bank;
   final List<int> data;
 
-  SXiDebugTunnelCommand({int bank = 0, required List<int> data})
-      : bank = bank & 0xFF,
-        data = List<int>.from(data.map((b) => b & 0xFF)),
+  SXiDebugTunnelCommand({required List<int> data})
+      : data = List<int>.from(data.map((b) => b & 0xFF)),
         super(0x0F, 0x07, 0);
 
   @override
   List<int> getParameters() {
     final int len = data.length & 0xFFFF;
     return [
-      bank,
       (len >> 8) & 0xFF,
       len & 0xFF,
       ...data,
@@ -784,16 +781,13 @@ class SXiDebugActivateCommand extends SXiPayload {
   final int id;
   final int param;
   final String name;
-  final int reserved;
 
   SXiDebugActivateCommand({
     required int id,
     required int param,
     required this.name,
-    int reserved = 0,
   })  : id = id & 0xFF,
         param = param & 0xFFFF,
-        reserved = reserved & 0xFF,
         super(0x0E, 0xC0, 0);
 
   @override
@@ -801,7 +795,6 @@ class SXiDebugActivateCommand extends SXiPayload {
     final List<int> s = name.codeUnits + [0x00];
     return [
       id,
-      reserved,
       (param >> 8) & 0xFF,
       param & 0xFF,
       ...s,
@@ -810,10 +803,14 @@ class SXiDebugActivateCommand extends SXiPayload {
 }
 
 class SXiDebugUnmonitorCommand extends SXiPayload {
-  SXiDebugUnmonitorCommand() : super(0x0F, 0x05, 0);
+  final int mode;
+
+  SXiDebugUnmonitorCommand({int mode = 0})
+      : mode = mode & 0xFF,
+        super(0x0F, 0x05, 0);
 
   @override
   List<int> getParameters() {
-    return [0x00, 0x00];
+    return [mode];
   }
 }
