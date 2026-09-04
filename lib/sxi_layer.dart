@@ -10,10 +10,12 @@ import 'package:orbit/metadata/metadata.dart';
 import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/sxi_indications.dart';
+import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/device_layer.dart';
 import 'package:orbit/device_message.dart';
 import 'package:orbit/sxi_payload.dart';
 import 'package:orbit/app_state.dart';
+import 'package:orbit/host_audio_playback_debug.dart';
 import 'package:orbit/logging.dart';
 
 class SXiLayer {
@@ -23,6 +25,8 @@ class SXiLayer {
   final Queue<DeviceMessage> rxBuffer = Queue<DeviceMessage>();
   late SDTPProcessor sdtpProcessor;
   late XmAppProcessor xmAppProcessor;
+  HostAudioPlaybackDebug? hostAudioPlaybackDebug;
+  SXiPlaybackAudioPacketCommand? _pendingHostAudioPacket;
 
   final AppState appState;
 
@@ -105,7 +109,8 @@ class SXiLayer {
         sxiState = SXiState.receiveDataMessage;
         break;
       case PayloadType.audio:
-        logger.d('Not Processing Audio Payload: ${message.payload}');
+        rxBuffer.add(message);
+        sxiState = SXiState.receiveControlMessage;
         break;
       case PayloadType.debug:
         logger.d('Not Processing Debug Payload: ${message.payload}');
@@ -118,6 +123,12 @@ class SXiLayer {
 
   // Process a response message from the device
   void processResponse(DeviceMessage message) {
+    if (hostAudioPlaybackDebug?.isRunning == true) {
+      logger.i(
+          'HAP RX response opcode: 0x${message.payload.opcode.toRadixString(16)} '
+          'type: ${message.payloadType.name} seq: ${message.sequence} '
+          'bytes: ${_hapBytes(message)}');
+    }
     if (txBuffer.isNotEmpty && txBuffer.first.sequence == message.sequence) {
       switch (message.payloadType) {
         case PayloadType.init:
@@ -128,7 +139,6 @@ class SXiLayer {
           showError(SXiError.invalid);
           break;
         case PayloadType.audio:
-          showError(SXiError.noEntry);
           break;
       }
 
@@ -158,6 +168,13 @@ class SXiLayer {
   // Process an indication message from the device
   void processIndication(DeviceMessage message) {
     List<int>? additionalAckPayload;
+    if (hostAudioPlaybackDebug?.isRunning == true) {
+      final int opcode = message.payload.opcode;
+      if (opcode == 0x8280 || opcode == 0x8441 || opcode == 0x8443) {
+        logger.i('HAP RX indication opcode: 0x${opcode.toRadixString(16)} '
+            '${message.payload.runtimeType} byteLen: ${_hapBytes(message).length}');
+      }
+    }
 
     switch (message.payload) {
       case SXiConfigureModuleIndication moduleInfo:
@@ -243,6 +260,14 @@ class SXiLayer {
         var channel =
             bitCombine(bufferedInfo.chanIDMsb, bufferedInfo.chanIDLsb);
         logger.t("Content Successfully Buffered: $channel");
+        break;
+
+      case SXiAudioRequestIndication audioRequest:
+        logger.i(
+            'HAP audio request: opcode: 0x${audioRequest.opcode.toRadixString(16)} '
+            'txn: ${audioRequest.transactionID} packetId: ${audioRequest.packetId}');
+        _pendingHostAudioPacket =
+            hostAudioPlaybackDebug?.packetForRequest(audioRequest.packetId);
         break;
 
       case SXiEventIndication eventIndication:
@@ -796,6 +821,18 @@ class SXiLayer {
     deviceLayer.buildAck(message, additionalAckPayload);
     sxiState = SXiState.sendControlCommand;
     cycleState();
+
+    final pendingAudio = _pendingHostAudioPacket;
+    _pendingHostAudioPacket = null;
+    if (pendingAudio != null) {
+      deviceLayer.sendAudioCommand(pendingAudio);
+    }
+  }
+
+  static String _hapBytes(DeviceMessage message) {
+    return message.payloadAsBytes
+        .map((int b) => b.toRadixString(16).padLeft(2, '0'))
+        .join(' ');
   }
 
   int? _extractMatchedId(SXiSeekIndication seekIndication,

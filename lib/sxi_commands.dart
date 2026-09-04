@@ -234,6 +234,41 @@ class SXiSelectChannelCommand extends SXiPayload {
   }
 }
 
+class SXiPlaybackAudioPacketCommand extends SXiPayload {
+  static const int encoderType = 6;
+  static const int maxPacketBytes = 0x510;
+
+  final int packetId;
+  final int bitrateKbps;
+  final bool lastPacket;
+  final List<int> audioData;
+
+  SXiPlaybackAudioPacketCommand({
+    required this.packetId,
+    required this.bitrateKbps,
+    required this.lastPacket,
+    required List<int> audioData,
+  })  : audioData = List<int>.from(audioData.take(maxPacketBytes)),
+        super(0x04, 0x43, 0);
+
+  @override
+  List<int> getParameters() {
+    final int length = audioData.length;
+    return [
+      (packetId >> 24) & 0xFF,
+      (packetId >> 16) & 0xFF,
+      (packetId >> 8) & 0xFF,
+      packetId & 0xFF,
+      encoderType,
+      bitrateKbps & 0xFF,
+      lastPacket ? 1 : 0,
+      (length >> 8) & 0xFF,
+      length & 0xFF,
+      ...audioData,
+    ];
+  }
+}
+
 class SXiAudioEqualizerCommand extends SXiPayload {
   List<int> bandGain;
 

@@ -1637,6 +1637,30 @@ class SXiFlashIndication extends SXiPayload {
   }
 }
 
+// Host audio playback request
+class SXiAudioRequestIndication extends SXiPayload {
+  final int packetId;
+
+  SXiAudioRequestIndication.fromBytes(List<int> frame)
+      : packetId = frame.length >= 7
+            ? ((frame[3] & 0xFF) << 24) |
+                ((frame[4] & 0xFF) << 16) |
+                ((frame[5] & 0xFF) << 8) |
+                (frame[6] & 0xFF)
+            : 0,
+        super(frame[0], frame[1], frame[2]);
+
+  @override
+  List<int> getParameters() {
+    return [
+      (packetId >> 24) & 0xFF,
+      (packetId >> 16) & 0xFF,
+      (packetId >> 8) & 0xFF,
+      packetId & 0xFF,
+    ];
+  }
+}
+
 // Firmware erase indication
 class SXiFirmwareEraseIndication extends SXiPayload {
   final int indCode;
@@ -1729,9 +1753,7 @@ class SXiErrorIndication extends SXiPayload {
   final int error;
 
   SXiErrorIndication.fromBytes(List<int> frame)
-      : error = frame.length >= 5
-            ? bitCombine(frame[3], frame[4])
-            : frame[3],
+      : error = frame.length >= 5 ? bitCombine(frame[3], frame[4]) : frame[3],
         super(frame[0], frame[1], frame[2]);
 
   @override

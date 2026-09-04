@@ -34,6 +34,7 @@ import 'package:orbit/sxi_command_types.dart';
 import 'package:orbit/sxi_commands.dart';
 import 'package:orbit/sxi_indication_types.dart';
 import 'package:orbit/logging.dart';
+import 'package:orbit/host_audio_playback_debug.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_io/io.dart';
@@ -887,6 +888,29 @@ class SettingsPage extends StatelessWidget {
                         0,
                       );
                       mainPage.deviceLayer.sendControlCommand(cmd);
+                    },
+                  ),
+                  _buildSettingTile(
+                    context,
+                    'Play Test Tone (HAP debug)',
+                    '3s Host-generated analog 440Hz tone',
+                    Icons.speaker_phone,
+                    onTap: () {
+                      final sxiLayer = mainPage.sxiLayer;
+                      sxiLayer.hostAudioPlaybackDebug?.stop();
+                      final session = HostAudioPlaybackDebug(
+                        (payload) {
+                          mainPage.deviceLayer.sendControlCommand(payload);
+                        },
+                      );
+                      sxiLayer.hostAudioPlaybackDebug = session;
+                      session.start();
+                      mainPage.deviceLayer.onMessage?.call(
+                        'HAP debug',
+                        'HAP tone running',
+                        snackbar: true,
+                        dismissable: true,
+                      );
                     },
                   ),
                   _buildSettingTile(

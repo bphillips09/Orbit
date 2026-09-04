@@ -619,6 +619,26 @@ class DeviceLayer {
     return message;
   }
 
+  DeviceMessage? sendAudioCommand(SXiPayload payload) {
+    if (!_initialized) {
+      onError?.call('Device is not initialized', true);
+      return null;
+    }
+
+    if (_activeProtocol == DeviceProtocol.xm) {
+      return null;
+    }
+
+    logger.t('Send Audio Command: $payload');
+
+    final sequence = incrementSequence();
+    final message = DeviceMessage(sequence, PayloadType.audio, payload);
+    _sxiLayer.txBuffer.add(message);
+    _sxiLayer.sxiState = SXiState.sendControlCommand;
+    _sxiLayer.cycleState();
+    return message;
+  }
+
   void requestGuideWalkIfStale() {
     if (_activeProtocol != DeviceProtocol.xm) return;
     _xmAdapter.requestGuideWalkIfStale();

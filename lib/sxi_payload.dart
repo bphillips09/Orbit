@@ -39,6 +39,8 @@ abstract class SXiPayload {
         SXiInstantReplayRecordMetadataIndication.fromBytes(bytes),
     0x8420: (bytes) => SXiBulletinStatusIndication.fromBytes(bytes),
     0x8421: (bytes) => SXiFlashIndication.fromBytes(bytes),
+    0x8441: (bytes) => SXiAudioRequestIndication.fromBytes(bytes),
+    0x8443: (bytes) => SXiAudioRequestIndication.fromBytes(bytes),
     0x8422: (bytes) => SXiContentBufferedIndication.fromBytes(bytes),
     0x8442: (bytes) => SXiRecordTrackMetadataIndication.fromBytes(bytes),
     0x8500: (bytes) => SXiDataServiceStatusIndication.fromBytes(bytes),

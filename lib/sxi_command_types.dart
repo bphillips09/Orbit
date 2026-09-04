@@ -143,7 +143,9 @@ enum ChanSelectionType {
   abortBulletinAndResumePlaybackOfPreviousContent(0x10),
   playFlashEvent(0x11),
   remainOnFlashEventChannel(0x12),
-  abortFlashEventAndResumePlaybackOfPreviousContent(0x13);
+  abortFlashEventAndResumePlaybackOfPreviousContent(0x13),
+  playHostAudio(0x14),
+  abortHostAudioPlayback(0x15);
 
   const ChanSelectionType(this.value);
   final int value;
