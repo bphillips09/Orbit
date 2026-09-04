@@ -15,6 +15,8 @@ class AppLogger {
   Level _currentLevel = kDebugMode ? Level.debug : Level.info;
   IOSink? _fileSink;
   File? _logFile;
+  int _currentFileBytes = 0;
+  Future<void> _fileIo = Future<void>.value();
   static const int _maxBytes = 1024 * 1024 * 10; // 10 MiB
   static const int _maxRotations = 3;
   LogOutput? _output;
@@ -68,8 +70,19 @@ class AppLogger {
     );
   }
 
+  Future<void> _serialized(Future<void> Function() action) {
+    final Future<void> run = _fileIo.then((_) => action());
+    _fileIo = run.catchError((_) {});
+    return run;
+  }
+
   // Ensure file output is initialized once the Flutter binding is ready
   Future<void> ensureFileOutputReady() async {
+    if (kIsWeb || kIsWasm) return;
+    await _serialized(_ensureFileUnlocked);
+  }
+
+  Future<void> _ensureFileUnlocked() async {
     if (kIsWeb || kIsWasm) return;
     if (_fileSink != null) return;
 
@@ -80,6 +93,11 @@ class AppLogger {
         await logsDir.create(recursive: true);
       }
       _logFile = File(p.join(logsDir.path, 'orbit$_fileExtension'));
+      if (await _logFile!.exists()) {
+        _currentFileBytes = await _logFile!.length();
+      } else {
+        _currentFileBytes = 0;
+      }
       await _maybeRotateLogs();
       _fileSink = _logFile!.openWrite(mode: FileMode.append);
 
@@ -116,29 +134,32 @@ class AppLogger {
     }
   }
 
+  void _enqueueFileWrite(List<String> lines) {
+    _serialized(() => _writeLinesToFile(lines));
+  }
+
   // Safely write lines to the log file with rotation enforcement
   Future<void> _writeLinesToFile(List<String> lines) async {
     if (kIsWeb || kIsWasm) return;
+    if (lines.isEmpty) return;
     try {
-      if (_logFile == null || _fileSink == null) {
-        await ensureFileOutputReady();
-      }
-      if (_logFile == null) return;
+      await _ensureFileUnlocked();
+      if (_logFile == null || _fileSink == null) return;
 
-      // Rotate if current file is at/over limit
-      try {
-        final int size = await _logFile!.length();
-        if (size >= _maxBytes) {
-          await _maybeRotateLogs();
-          // Reopen sink for the new current file
+      final IOSink sink = _fileSink!;
+      var incomingBytes = 0;
+      for (final line in lines) {
+        incomingBytes += line.length + 1;
+        sink.writeln(line);
+      }
+      _currentFileBytes += incomingBytes;
+
+      if (_currentFileBytes >= _maxBytes) {
+        await _maybeRotateLogs();
+        // Only open a new sink if rotation actually closed the previous one
+        if (_fileSink == null && _logFile != null) {
           _fileSink = _logFile!.openWrite(mode: FileMode.append);
         }
-      } catch (_) {}
-
-      final IOSink? sink = _fileSink;
-      if (sink == null) return;
-      for (final line in lines) {
-        sink.writeln(line);
       }
     } catch (_) {
       // Swallow write errors to avoid crashing the app due to logging
@@ -149,20 +170,32 @@ class AppLogger {
   Future<void> _maybeRotateLogs() async {
     try {
       if (_logFile == null) return;
-      if (!await _logFile!.exists()) return;
-      final int size = await _logFile!.length();
-      if (size < _maxBytes) return;
 
-      // Close the current sink first
-      await _fileSink?.flush();
-      await _fileSink?.close();
+      try {
+        await _fileSink?.flush();
+      } catch (_) {}
+
+      if (!await _logFile!.exists()) return;
+
+      final int diskSize = await _logFile!.length();
+      final int size =
+          diskSize > _currentFileBytes ? diskSize : _currentFileBytes;
+      if (size < _maxBytes) {
+        _currentFileBytes = size;
+        return;
+      }
+
+      try {
+        await _fileSink?.close();
+      } catch (_) {}
       _fileSink = null;
 
+      final String parentPath = _logFile!.parent.path;
+      final String currentName = 'orbit$_fileExtension';
+
       for (int i = _maxRotations - 1; i >= 1; i--) {
-        final rotated =
-            File(p.join(_logFile!.parent.path, 'orbit$_fileExtension.$i'));
-        final next = File(
-            p.join(_logFile!.parent.path, 'orbit$_fileExtension.${i + 1}'));
+        final rotated = File(p.join(parentPath, '$currentName.$i'));
+        final next = File(p.join(parentPath, '$currentName.${i + 1}'));
         if (await rotated.exists()) {
           if (await next.exists()) {
             await next.delete();
@@ -172,14 +205,14 @@ class AppLogger {
       }
 
       // Move the current log to .1 and recreate an empty current log
-      final first =
-          File(p.join(_logFile!.parent.path, 'orbit$_fileExtension.1'));
+      final first = File(p.join(parentPath, '$currentName.1'));
       if (await first.exists()) {
         await first.delete();
       }
       await _logFile!.rename(first.path);
-      _logFile = File(p.join(_logFile!.parent.path, 'orbit$_fileExtension'));
+      _logFile = File(p.join(parentPath, currentName));
       await _logFile!.create(recursive: true);
+      _currentFileBytes = 0;
     } catch (_) {
       // Swallow any rotation errors
     }
@@ -259,9 +292,13 @@ class AppLogger {
     try {
       await _lineStreamController.close();
     } catch (_) {}
-    await _fileSink?.flush();
-    await _fileSink?.close();
-    _fileSink = null;
+    await _serialized(() async {
+      try {
+        await _fileSink?.flush();
+        await _fileSink?.close();
+      } catch (_) {}
+      _fileSink = null;
+    });
   }
 }
 
@@ -269,7 +306,7 @@ class AppLogger {
 class _FileSinkOutput extends LogOutput {
   @override
   void output(OutputEvent event) {
-    AppLogger.instance._writeLinesToFile(event.lines);
+    AppLogger.instance._enqueueFileWrite(List<String>.of(event.lines));
   }
 }
 

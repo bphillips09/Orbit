@@ -14,19 +14,27 @@ class FrameTracer {
   bool _enabled = false;
   IOSink? _sink;
   File? _file;
+  int _currentBytes = 0;
+  Future<void> _io = Future<void>.value();
   static const int _maxBytes = 2 * 1024 * 1024; // 2 MB max file size
   static const int _maxRotations = 3;
 
   bool get isEnabled => _enabled;
   String? get traceFilePath => _file?.path;
 
+  Future<void> _serialized(Future<void> Function() action) {
+    final Future<void> run = _io.then((_) => action());
+    _io = run.catchError((_) {});
+    return run;
+  }
+
   Future<void> setEnabled(bool enabled) async {
     _enabled = enabled && !kIsWeb;
     if (!_enabled) {
-      await _disposeSink();
+      await _serialized(_disposeSink);
       return;
     }
-    await _ensureFile();
+    await _serialized(_ensureFile);
     try {
       await AppLogger.instance.ensureFileOutputReady();
     } catch (_) {}
@@ -42,9 +50,13 @@ class FrameTracer {
         await logsDir.create(recursive: true);
       }
       _file = File(p.join(logsDir.path, 'link_trace.log'));
+      if (await _file!.exists()) {
+        _currentBytes = await _file!.length();
+      } else {
+        _currentBytes = 0;
+      }
       await _maybeRotate();
       _sink = _file!.openWrite(mode: FileMode.append);
-      await _sink!.flush();
     } catch (_) {
       await _disposeSink();
     }
@@ -53,9 +65,19 @@ class FrameTracer {
   Future<void> _maybeRotate() async {
     try {
       if (_file == null) return;
+
+      try {
+        await _sink?.flush();
+      } catch (_) {}
+
       if (!await _file!.exists()) return;
-      final size = await _file!.length();
-      if (size < _maxBytes) return;
+
+      final diskSize = await _file!.length();
+      final size = diskSize > _currentBytes ? diskSize : _currentBytes;
+      if (size < _maxBytes) {
+        _currentBytes = size;
+        return;
+      }
 
       await _disposeSink();
 
@@ -75,8 +97,9 @@ class FrameTracer {
         await first.delete();
       }
       await _file!.rename(first.path);
-      _file = File(_file!.path); // recreate current
+      _file = File(_file!.path);
       await _file!.create(recursive: true);
+      _currentBytes = 0;
     } catch (_) {}
   }
 
@@ -106,22 +129,30 @@ class FrameTracer {
 
   Future<void> logRxFrame(Uint8List frame) async {
     if (!_enabled) return;
-    await _ensureFile();
-    if (_sink == null) return;
-    try {
-      await _maybeRotate();
-      _sink!.write(_formatFrame(frame, 'RX'));
-    } catch (_) {}
+    await _writeFrame(frame, 'RX');
   }
 
   Future<void> logTxFrame(Uint8List frame) async {
     if (!_enabled) return;
-    await _ensureFile();
-    if (_sink == null) return;
-    try {
-      await _maybeRotate();
-      _sink!.write(_formatFrame(frame, 'TX'));
-    } catch (_) {}
+    await _writeFrame(frame, 'TX');
+  }
+
+  Future<void> _writeFrame(Uint8List frame, String dir) {
+    return _serialized(() async {
+      await _ensureFile();
+      if (_sink == null || _file == null) return;
+      try {
+        final formatted = _formatFrame(frame, dir);
+        _sink!.write(formatted);
+        _currentBytes += formatted.length;
+        if (_currentBytes >= _maxBytes) {
+          await _maybeRotate();
+          if (_sink == null && _file != null) {
+            _sink = _file!.openWrite(mode: FileMode.append);
+          }
+        }
+      } catch (_) {}
+    });
   }
 }
 
