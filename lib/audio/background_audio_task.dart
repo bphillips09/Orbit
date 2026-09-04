@@ -289,17 +289,23 @@ class AudioServiceHandler extends BaseAudioHandler
     }
 
     if (image.isNotEmpty && !kIsWeb && !kIsWasm) {
-      if (albumArt == null || cacheDir == null) {
-        cacheDir = await getApplicationCacheDirectory();
+      cacheDir ??= await getApplicationCacheDirectory();
+      final File target = File('${cacheDir!.path}/${programId.join()}.jpg');
+      final File? previous = albumArt;
+      albumArt = target;
 
-        albumArt = File('${cacheDir?.path}/${programId.join()}.jpg');
-      } else {
-        albumArt =
-            await albumArt?.rename('${cacheDir?.path}/${programId.join()}.jpg');
+      if (previous != null && previous.path != target.path) {
+        try {
+          if (await previous.exists()) {
+            await previous.delete();
+          }
+        } catch (e) {
+          logger.t('Could not remove previous album art cache: $e');
+        }
       }
 
-      var writtenFile = await albumArt?.writeAsBytes(image);
-      return writtenFile?.uri;
+      final File writtenFile = await target.writeAsBytes(image);
+      return writtenFile.uri;
     }
 
     return null;
