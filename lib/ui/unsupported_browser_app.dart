@@ -42,7 +42,7 @@ class UnsupportedBrowserApp extends StatelessWidget {
                           ),
                           textAlign: TextAlign.center),
                       const SizedBox(height: 16),
-                      Text('An SXV300 tuner is required.',
+                      Text('A compatible tuner is required.',
                           style: TextStyle(
                             fontSize: 16,
                             color: onSurfaceColor,

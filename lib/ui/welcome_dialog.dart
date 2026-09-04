@@ -45,7 +45,7 @@ class WelcomeDialog extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'An SXV300 tuner is required.',
+              'A compatible tuner is required.',
               style: TextStyle(fontSize: 16, color: onSurfaceColor),
             ),
             const SizedBox(height: 16),
