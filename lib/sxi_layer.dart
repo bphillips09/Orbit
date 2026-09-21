@@ -297,10 +297,25 @@ class SXiLayer {
         var sid = bitCombine(channelInfo.sidMsb, channelInfo.sidLsb);
         var chan = bitCombine(channelInfo.chanIDMsb, channelInfo.chanIDLsb);
 
-        appState.addChannel(sid, chan,
-            String.fromCharCodes(channelInfo.chanNameLong), channelInfo.catID);
+        final String channelName =
+            String.fromCharCodes(channelInfo.chanNameLong).trim();
+        appState.addChannel(sid, chan, channelName, channelInfo.catID);
+        // Delayed labels update the guide via channel info; refresh
+        // now-playing when they arrive for the tuned channel.
+        final bool isTunedChannel = chan == appState.currentChannel &&
+            (appState.currentSid == 0 || sid == appState.currentSid);
+        if (channelName.isNotEmpty && isTunedChannel) {
+          appState.updateNowPlayingChannelName(channelInfo.chanNameLong);
+          if (channelInfo.catID != 0xFF) {
+            appState.updateNowPlayingCategory(channelInfo.catID);
+          }
+          if (sid != appState.currentSid) {
+            appState.updateNowPlayingChannelImage();
+          }
+          appState.updateNowPlaying();
+        }
         logger.t(
-            "Update Station: Channel: $chan, SID: $sid, Name: ${String.fromCharCodes(channelInfo.chanNameLong)}"
+            "Update Station: Channel: $chan, SID: $sid, Name: $channelName"
             " - ${ChannelAttributes.namesFromMask(channelInfo.chanAttributes)} - ${IndicationCode.getByValue(channelInfo.indCode)}"
             " - ${channelInfo.recordRestrictions}");
         break;
