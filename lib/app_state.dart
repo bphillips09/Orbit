@@ -1446,8 +1446,15 @@ class AppState extends ChangeNotifier {
     Uint8List programId,
     List<int> img,
   ) {
+    final bool channelChanged =
+        channel != _currentChannel || sid != _currentSid;
+
     if (newStation.isNotEmpty) {
       updateNowPlayingChannelName(newStation);
+    } else if (channelChanged) {
+      // Don't keep the previous station name across a channel/SID change.
+      final String knownName = sidMap[sid]?.channelName.trim() ?? '';
+      updateNowPlayingChannelName(knownName.codeUnits);
     }
     updateNowPlayingSong(newSong);
     updateNowPlayingArtist(newArtist);
