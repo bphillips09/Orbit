@@ -97,6 +97,8 @@ class DeviceLayer {
           _sxiLayer.appState.getChannelIdFromSid(sid),
       resolveSidFromChannel: (int channel) =>
           _sxiLayer.appState.getSidFromChannelId(channel),
+      resolveCategoryFromSid: (int sid) =>
+          _sxiLayer.appState.sidMap[sid]?.catId,
       emitSxiIndication: _emitTranslatedSxiIndication,
       markRx: _markRx,
       startHeartbeatMonitor: _startHeartbeatMonitor,

@@ -152,6 +152,7 @@ class XmProtocolAdapter {
     required this.currentCategoryProvider,
     required this.resolveChannelFromSid,
     required this.resolveSidFromChannel,
+    required this.resolveCategoryFromSid,
     required this.emitSxiIndication,
     required this.markRx,
     required this.startHeartbeatMonitor,
@@ -203,6 +204,7 @@ class XmProtocolAdapter {
   final int Function() currentCategoryProvider;
   final int? Function(int sid) resolveChannelFromSid;
   final int? Function(int channel) resolveSidFromChannel;
+  final int? Function(int sid) resolveCategoryFromSid;
   final void Function(SXiPayload payload) emitSxiIndication;
   final void Function() markRx;
   final void Function() startHeartbeatMonitor;
@@ -610,10 +612,14 @@ class XmProtocolAdapter {
       return;
     }
     final int channel = payload[4] & 0xFF;
+    // Normalize SID so AppState can resolve the station name from the guide.
+    final int effectiveSid =
+        _normalizeSidForChannel(channel: channel, rawSid: sid) ?? sid;
+    final int? knownCategory = resolveCategoryFromSid(effectiveSid);
     _emitSelectChannel(
       channel: channel,
-      sid: sid,
-      category: currentCategoryProvider(),
+      sid: effectiveSid,
+      category: knownCategory ?? currentCategoryProvider(),
       channelName: '',
       artist: '',
       song: '',
